@@ -1,9 +1,6 @@
-<h1 align="center">CommandBloom</h1>
-
-<p align="center">
-  A native, open-source Actions Ring alternative for the Logitech MX Master 4 on macOS.<br>
-  Press the Haptic Sense Panel, a glass ring blooms around your cursor, flick toward an action — done.
-</p>
+- An open-source Actions Ring alternative for the Logitech MX Master 4 on macOS
+- Native and local — talks directly to the mouse, nothing leaves your machine
+- No settings UI — your coding agent installs and configures it
 
 <!--
 The URL below is a github user-attachments upload of
@@ -13,11 +10,6 @@ this URL.
 -->
 
 https://github.com/user-attachments/assets/f5f9d8a9-18c9-4357-9433-fe4240b5a7b8
-
-CommandBloom turns the MX Master 4's Sense Panel into a radial launcher for
-apps, shortcuts, URLs, and commands. It runs entirely on your Mac, talks
-directly to the mouse, and has no settings UI — a coding agent configures it
-for you through a CLI.
 
 ## Install
 
