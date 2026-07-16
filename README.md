@@ -6,13 +6,11 @@
 </p>
 
 <!--
-GitHub only plays videos inline when they are uploaded through its web editor
-(github.com/user-attachments URLs); repo-committed files render as links. To
-upgrade this poster into an inline player: edit README.md on github.com, drag
-docs/assets/command-bloom-demo.mp4 into the editor, and put the URL GitHub
-inserts on its own line here.
+The URL below is a github user-attachments upload of
+docs/assets/command-bloom-demo.mp4 — GitHub only plays those inline. If the
+demo is regenerated, re-upload it through the README web editor and replace
+this URL.
 -->
-
 
 https://github.com/user-attachments/assets/f5f9d8a9-18c9-4357-9433-fe4240b5a7b8
 
@@ -23,9 +21,8 @@ for you through a CLI.
 
 ## Install
 
-Copy this to your coding agent. Ask it to read all the code before running
-anything and make sure there is no ill intent or promotion hiding in it, then
-have it build the software and guide you through setup:
+**Have your coding agent check the code for ill intent or issues first — then
+let it clone, build, and walk you through setup.** Copy this to your agent:
 
 ```text
 Clone https://github.com/bra1nDump/command-bloom and read the source before
