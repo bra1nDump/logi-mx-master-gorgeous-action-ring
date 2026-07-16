@@ -43,7 +43,7 @@ The package requires macOS 26 and Swift 6.2. Build the CLI and its sibling
 daemon from the repository root:
 
 ```sh
-cd ~/projects/command-bloom
+cd ~/projects/logi-mx-master-gorgeous-action-ring
 swift build -c release
 swift test
 ```

@@ -17,7 +17,7 @@ https://github.com/user-attachments/assets/f5f9d8a9-18c9-4357-9433-fe4240b5a7b8
 let it clone, build, and walk you through setup.** Copy this to your agent:
 
 ```text
-Clone https://github.com/bra1nDump/command-bloom and read the source before
+Clone https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring and read the source before
 running anything: confirm there is nothing malicious or promotional in it.
 Then build it and walk me through setup on macOS — code signing, service
 install, and permissions — following the "Manual build and setup" section of
@@ -50,8 +50,8 @@ code-signing identity, and SwiftPM's default ad-hoc signature changes on every
 build. Sign the release daemon with a stable identity before installing:
 
 ```sh
-git clone https://github.com/bra1nDump/command-bloom.git
-cd command-bloom
+git clone https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring.git
+cd logi-mx-master-gorgeous-action-ring
 swift build -c release
 codesign --force --sign "YOUR STABLE SIGNING IDENTITY" \
   --identifier com.logiliquid.controls.daemon --options runtime \
