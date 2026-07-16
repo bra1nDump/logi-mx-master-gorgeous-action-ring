@@ -11,35 +11,39 @@ enum LogiLiquidDaemonMain {
       let options = try DaemonLaunchOptions.parse(
         Array(CommandLine.arguments.dropFirst())
       )
-      let termination = DaemonTerminationGate()
+      let gate = DaemonSupervisorGate()
       let host = try ProductionMouseDaemonFactory.make(
         configurationURL: options.configurationURL,
         socketURL: options.socketURL,
         selectedRegistryID: options.selectedRegistryID,
         terminalDeviceFailureHandler: { message in
-          termination.signal(.deviceFailure(message))
+          gate.signalDeviceFailure(message)
         }
       )
-      try runUntilTerminated(host, termination: termination)
+      try superviseUntilShutdown(host, gate: gate)
     } catch {
-      FileHandle.standardError.write(
-        Data("logi-liquid-daemon: \(error.localizedDescription)\n".utf8)
-      )
+      DaemonLog.log(error.localizedDescription)
       Darwin.exit(1)
     }
   }
 
-  private static func runUntilTerminated(
+  /// Keeps one daemon process alive across mouse disconnects, sleep/wake, and
+  /// half-awake Bluetooth reconnects. The control socket stays up throughout
+  /// so `status` and the overlay keep working while the device is away;
+  /// only the device session is torn down and retried. `KeepAlive` in the
+  /// LaunchAgent remains the safety net for crashes and genuinely fatal
+  /// errors, which still exit.
+  private static func superviseUntilShutdown(
     _ host: MouseDaemonControlHost,
-    termination: DaemonTerminationGate
+    gate: DaemonSupervisorGate
   ) throws {
     Darwin.signal(SIGINT, SIG_IGN)
     Darwin.signal(SIGTERM, SIG_IGN)
 
     let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
     let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-    interrupt.setEventHandler { termination.signal(.signal) }
-    terminate.setEventHandler { termination.signal(.signal) }
+    interrupt.setEventHandler { gate.signalShutdown() }
+    terminate.setEventHandler { gate.signalShutdown() }
     interrupt.resume()
     terminate.resume()
     defer {
@@ -47,54 +51,65 @@ enum LogiLiquidDaemonMain {
       terminate.cancel()
     }
 
-    try host.start()
-    let reason = termination.wait()
-    // `stop()` waits for the HID backend's event loop to restore the exact
-    // pre-diversion state before this process is allowed to exit.
-    try host.stop()
+    try host.server.start()
+    defer { host.server.stop() }
 
-    if case .deviceFailure(let message) = reason {
-      throw DaemonRuntimeError.deviceTerminated(message)
-    }
-  }
-}
+    var backoff = DaemonRetryBackoff()
+    var lastLoggedFailure: String?
+    var announcedActive = false
 
-private enum DaemonTerminationReason: Sendable {
-  case signal
-  case deviceFailure(String)
-}
+    supervision: while true {
+      do {
+        try host.coordinator.start()
+      } catch let error as MouseDaemonError where error.preventsAutomaticDeviceRecovery {
+        throw error
+      } catch {
+        // Device absent or not ready yet. Log transitions, not every retry.
+        let message = error.localizedDescription
+        if message != lastLoggedFailure {
+          lastLoggedFailure = message
+          DaemonLog.log("waiting for the MX Master 4: \(message)")
+        }
+        gate.reset()
+        if gate.wait(timeout: backoff.next()) == .signal {
+          break supervision
+        }
+        continue
+      }
 
-private final class DaemonTerminationGate: @unchecked Sendable {
-  private let condition = NSCondition()
-  private var reason: DaemonTerminationReason?
+      if !announcedActive || lastLoggedFailure != nil {
+        announcedActive = true
+        lastLoggedFailure = nil
+        DaemonLog.log("MX Master 4 connected; Sense Panel ring active")
+      }
+      backoff.reset()
 
-  func signal(_ reason: DaemonTerminationReason) {
-    condition.lock()
-    if self.reason == nil {
-      self.reason = reason
-      condition.broadcast()
-    }
-    condition.unlock()
-  }
+      let event = gate.wait()
+      // `stop()` waits for the HID backend's event loop to restore the exact
+      // pre-diversion state (when the device is still reachable) before the
+      // session is considered over.
+      do {
+        try host.coordinator.stop()
+      } catch {
+        DaemonLog.log(
+          "could not restore the Sense Panel state (\(error.localizedDescription)); "
+            + "the recovery journal restores it on reconnect"
+        )
+      }
 
-  func wait() -> DaemonTerminationReason {
-    condition.lock()
-    while reason == nil {
-      condition.wait()
-    }
-    let result = reason!
-    condition.unlock()
-    return result
-  }
-}
-
-private enum DaemonRuntimeError: LocalizedError {
-  case deviceTerminated(String)
-
-  var errorDescription: String? {
-    switch self {
-    case .deviceTerminated(let message):
-      "The MX Master 4 HID session terminated: \(message)"
+      switch event {
+      case .signal:
+        break supervision
+      case .deviceFailure(let message):
+        DaemonLog.log("device session ended: \(message); reconnecting")
+        lastLoggedFailure = message
+        gate.reset()
+        if gate.wait(timeout: backoff.next()) == .signal {
+          break supervision
+        }
+      case .timeout:
+        break
+      }
     }
   }
 }

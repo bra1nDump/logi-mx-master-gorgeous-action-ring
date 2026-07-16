@@ -19,6 +19,8 @@ private final class FakeMXMaster4Driver: MXMaster4HIDDriving, @unchecked Sendabl
   private var closed = false
   private var failApply = false
   private var failRestore = false
+  private var failReporting = false
+  private var reportingDiverted = true
   private(set) var calls: [String] = []
   private(set) var haptics: [UInt8] = []
   private(set) var restoredSnapshots: [SensePanelDiversionSnapshot] = []
@@ -90,8 +92,45 @@ private final class FakeMXMaster4Driver: MXMaster4HIDDriving, @unchecked Sendabl
     condition.lock()
     calls.append("apply")
     let shouldFail = failApply
+    if !shouldFail { reportingDiverted = true }
     condition.unlock()
     if shouldFail { throw TestDriverError.apply }
+  }
+
+  /// Simulates the device silently dropping its volatile diversion, as
+  /// observed across system sleep.
+  func dropDiversion() {
+    condition.lock()
+    reportingDiverted = false
+    condition.unlock()
+  }
+
+  func setFailReporting(_ value: Bool) {
+    condition.lock()
+    failReporting = value
+    condition.unlock()
+  }
+
+  func sensePanelReportingState(
+    featureIndex: UInt8,
+    controlID: UInt16
+  ) throws -> ControlReportingState {
+    condition.lock()
+    calls.append("reporting-state")
+    let diverted = reportingDiverted
+    let shouldFail = failReporting
+    condition.unlock()
+    if shouldFail { throw TestDriverError.eventRead }
+    return ControlReportingState(
+      controlID: controlID,
+      diverted: diverted,
+      persistentlyDiverted: false,
+      rawXY: diverted,
+      forceRawXY: false,
+      remappedTo: nil,
+      analyticsKeyEvents: false,
+      rawWheel: false
+    )
   }
 
   func restoreDiversion(_ snapshot: SensePanelDiversionSnapshot) throws {
@@ -522,6 +561,131 @@ final class MXMaster4HIDBackendTests: XCTestCase {
       }
     }
     XCTAssertEqual(try journal.load(), snapshot)
+  }
+
+  func testHealthProbeReappliesSilentlyDroppedDiversion() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 0.02
+    )
+
+    try backend.start { _ in }
+    try waitUntil("first probe ran") {
+      driver.callSnapshot().contains("reporting-state")
+    }
+    XCTAssertEqual(driver.callSnapshot().filter { $0 == "apply" }.count, 1)
+
+    driver.dropDiversion()
+    try waitUntil("diversion re-applied") {
+      driver.callSnapshot().filter { $0 == "apply" }.count >= 2
+    }
+    XCTAssertTrue(backend.isActive, "a re-applied diversion must not end the session")
+    try backend.stop()
+  }
+
+  func testSleepJumpTriggersImmediateProbeDespiteLongInterval() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let wallClockOffset = WallClockOffset()
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 3_600,
+      wallClockProvider: { Date().addingTimeInterval(wallClockOffset.value) }
+    )
+
+    try backend.start { _ in }
+    Thread.sleep(forTimeInterval: 0.05)
+    XCTAssertFalse(
+      driver.callSnapshot().contains("reporting-state"),
+      "an hour-long interval must not probe during a short awake run"
+    )
+
+    driver.dropDiversion()
+    // The wall clock leaps while uptime does not: the machine slept.
+    wallClockOffset.value = 120
+    try waitUntil("post-wake probe re-applied the diversion") {
+      driver.callSnapshot().filter { $0 == "apply" }.count >= 2
+    }
+    try backend.stop()
+  }
+
+  func testHealthProbeFailureTerminatesSessionForSupervisorReconnect() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 0.02
+    )
+    let terminated = expectation(description: "session terminated")
+
+    try backend.start { event in
+      if case .terminated = event {
+        terminated.fulfill()
+      }
+    }
+    try waitUntil("first probe ran") {
+      driver.callSnapshot().contains("reporting-state")
+    }
+    driver.setFailReporting(true)
+    wait(for: [terminated], timeout: 2)
+    try waitUntil("session cleaned up") { !backend.isActive }
+  }
+
+  private func waitUntil(
+    _ what: String,
+    deadline: TimeInterval = 2,
+    file: StaticString = #filePath,
+    line: UInt = #line,
+    _ condition: () -> Bool
+  ) throws {
+    let end = Date().addingTimeInterval(deadline)
+    while Date() < end {
+      if condition() { return }
+      Thread.sleep(forTimeInterval: 0.005)
+    }
+    XCTFail("timed out waiting for \(what)", file: file, line: line)
+    throw POSIXError(.ETIMEDOUT)
+  }
+}
+
+private final class WallClockOffset: @unchecked Sendable {
+  private let lock = NSLock()
+  private var offset: TimeInterval = 0
+
+  var value: TimeInterval {
+    get {
+      lock.lock()
+      defer { lock.unlock() }
+      return offset
+    }
+    set {
+      lock.lock()
+      offset = newValue
+      lock.unlock()
+    }
   }
 }
 

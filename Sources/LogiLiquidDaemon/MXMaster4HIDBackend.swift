@@ -12,6 +12,10 @@ public protocol MXMaster4HIDDriving: AnyObject, Sendable {
   func prepareDiversion() throws -> SensePanelDiversionSnapshot
   func applyDiversion(_ snapshot: SensePanelDiversionSnapshot) throws
   func restoreDiversion(_ snapshot: SensePanelDiversionSnapshot) throws
+  func sensePanelReportingState(
+    featureIndex: UInt8,
+    controlID: UInt16
+  ) throws -> ControlReportingState
   func nextReport(timeoutMilliseconds: Int32) throws -> HIDPPPacket?
   func playHaptic(waveformID: UInt8) throws
   func close()
@@ -153,6 +157,16 @@ public final class IOKitMXMaster4HIDDriver: MXMaster4HIDDriving, @unchecked Send
     try session.restoreSensePanelDiversion(snapshot)
   }
 
+  public func sensePanelReportingState(
+    featureIndex: UInt8,
+    controlID: UInt16
+  ) throws -> ControlReportingState {
+    try session.controlReportingState(
+      featureIndex: featureIndex,
+      controlID: controlID
+    )
+  }
+
   public func nextReport(timeoutMilliseconds: Int32) throws -> HIDPPPacket? {
     try session.nextEventReport(timeoutMilliseconds: timeoutMilliseconds)
   }
@@ -210,7 +224,14 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
   private let driverFactory: any MXMaster4HIDDriverFactory
   private let journal: SensePanelDiversionJournalStore
   private let eventPollMilliseconds: Int32
+  private let healthProbeInterval: TimeInterval
+  private let uptimeProvider: @Sendable () -> TimeInterval
+  private let wallClockProvider: @Sendable () -> Date
   private let lifecycle = NSCondition()
+
+  /// A wall-clock jump this much larger than the uptime delta means the
+  /// machine slept; the device may have silently lost its diversion.
+  private static let sleepJumpThreshold: TimeInterval = 5
 
   private var context: ActiveContext?
   private var starting = false
@@ -233,16 +254,29 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
   public init(
     driverFactory: any MXMaster4HIDDriverFactory,
     journal: SensePanelDiversionJournalStore,
-    eventPollMilliseconds: Int32 = 100
+    eventPollMilliseconds: Int32 = 100,
+    healthProbeInterval: TimeInterval = 30,
+    uptimeProvider: @escaping @Sendable () -> TimeInterval = {
+      ProcessInfo.processInfo.systemUptime
+    },
+    wallClockProvider: @escaping @Sendable () -> Date = { Date() }
   ) throws {
     guard eventPollMilliseconds > 0 else {
       throw MouseDaemonError.invalidParameter(
         "The HID event poll interval must be positive."
       )
     }
+    guard healthProbeInterval > 0 else {
+      throw MouseDaemonError.invalidParameter(
+        "The health probe interval must be positive."
+      )
+    }
     self.driverFactory = driverFactory
     self.journal = journal
     self.eventPollMilliseconds = eventPollMilliseconds
+    self.healthProbeInterval = healthProbeInterval
+    self.uptimeProvider = uptimeProvider
+    self.wallClockProvider = wallClockProvider
   }
 
   public var isActive: Bool {
@@ -396,9 +430,44 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
     var sensePanelPressed = false
     var discardNextSensePanelRawXY = false
     var terminalError: (any Error)?
+    var lastUptime = uptimeProvider()
+    var lastWallClock = wallClockProvider()
+    var lastProbeUptime = lastUptime
 
     while shouldContinue(activeContext) {
       do {
+        // The MX Master 4 can silently drop its volatile diversion — most
+        // visibly across system sleep, when the ring stops appearing even
+        // though the session still reads cleanly. Probe the reporting state
+        // periodically, and immediately after a detected sleep, and re-apply
+        // the diversion if the device lost it. A probe failure is a terminal
+        // session error, which hands recovery to the supervisor.
+        let uptime = uptimeProvider()
+        let wallClock = wallClockProvider()
+        let wallDelta = wallClock.timeIntervalSince(lastWallClock)
+        let sleptSinceLastPoll =
+          wallDelta - (uptime - lastUptime) > Self.sleepJumpThreshold
+        lastUptime = uptime
+        lastWallClock = wallClock
+        if sleptSinceLastPoll || uptime - lastProbeUptime >= healthProbeInterval {
+          lastProbeUptime = uptime
+          if sleptSinceLastPoll {
+            DaemonLog.log("system wake detected; verifying the Sense Panel diversion")
+          }
+          let reporting = try activeContext.driver.sensePanelReportingState(
+            featureIndex: activeContext.snapshot.featureIndex,
+            controlID: activeContext.snapshot.control.controlID
+          )
+          if !reporting.diverted || !reporting.rawXY {
+            DaemonLog.log(
+              "the device dropped its Sense Panel diversion; re-applying"
+            )
+            try activeContext.driver.applyDiversion(activeContext.snapshot)
+            sensePanelPressed = false
+            discardNextSensePanelRawXY = false
+          }
+        }
+
         guard
           let packet = try activeContext.driver.nextReport(
             timeoutMilliseconds: eventPollMilliseconds

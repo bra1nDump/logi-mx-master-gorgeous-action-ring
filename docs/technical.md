@@ -354,9 +354,16 @@ version-1 journals have no fingerprint and recover only when their original
 registry entry ID still matches. Do not manually delete an existing journal
 before recovery.
 
-A terminal HID read failure or device disconnect follows the same clean-stop
-path: the daemon waits for diversion restoration, exits with an error, and the
-installed LaunchAgent's `KeepAlive` policy starts a fresh process.
+A terminal HID read failure or device disconnect ends only the device session,
+not the process: the daemon restores what it can, keeps the control socket up,
+and retries bring-up in-process with capped backoff (1 s doubling to 10 s),
+logging state transitions instead of every attempt. While the ring is active
+it also probes the Sense Panel reporting state every 30 seconds — and
+immediately after a detected system sleep — and silently re-applies the
+diversion if the mouse dropped it, which otherwise leaves a working cursor
+with a dead ring after wake. The LaunchAgent's `KeepAlive` policy remains the
+safety net for crashes and non-recoverable errors (wrong physical mouse,
+invalid configuration), which still exit.
 
 See [PROTOCOL.md](../PROTOCOL.md) for the device IDs, HID++ feature discovery,
 report formats, diversion transaction, and haptic protocol notes.
