@@ -8,8 +8,8 @@ the `logi-liquid` CLI.
 
 **Status:** the standalone backend and native Liquid Glass overlay are
 implemented and verified end to end with a physical MX Master 4. The signed
-production daemon runs as a per-user LaunchAgent; the overlay remains a
-separate native process.
+production daemon and the overlay each run as their own per-user LaunchAgent,
+both installed by `service install`.
 
 The backend currently:
 
@@ -134,17 +134,21 @@ launchctl enable "gui/$(id -u)/com.logi.cp-dev-mgr"
 open /Applications/logioptionsplus.app
 ```
 
-## Install and operate the service
+## Install and operate the services
 
-`service install` copies the sibling release daemon into the user's Application
-Support directory, writes a per-user LaunchAgent, and starts it immediately:
+`service install` copies the sibling release daemon and overlay into the
+user's Application Support directory, writes a per-user LaunchAgent for each
+(`com.logiliquid.controls.daemon` and `com.logiliquid.controls.overlay`), and
+starts both immediately. Both agents use `KeepAlive`, so they restart after a
+crash and start at login:
 
 ```sh
 ./.build/release/logi-liquid service install
 ```
 
-Manage the LaunchAgent and inspect both its lifecycle state and the running
-daemon separately:
+Manage both LaunchAgents together and inspect lifecycle state and the running
+daemon separately. `service status` reports `daemonLoaded` and `overlayLoaded`
+individually:
 
 ```sh
 ./.build/release/logi-liquid service status
@@ -157,13 +161,29 @@ daemon separately:
 ./.build/release/logi-liquid device inspect
 ```
 
-`service uninstall` stops the LaunchAgent and removes the installed daemon and
-plist. It deliberately preserves the action configuration and logs, and it
-does not re-enable Logi Options+ automatically:
+`service uninstall` stops both LaunchAgents and removes the installed
+executables and plists. It deliberately preserves the action configuration and
+logs, and it does not re-enable Logi Options+ automatically:
 
 ```sh
 ./.build/release/logi-liquid service uninstall
 ```
+
+### Logs and the missing-overlay failure mode
+
+Both services log through launchd into one directory:
+
+| Log | Path |
+| --- | --- |
+| Daemon | `~/Library/Application Support/Logi Liquid Controls/logs/daemon.log`, `daemon.error.log` |
+| Overlay | `~/Library/Application Support/Logi Liquid Controls/logs/overlay.log`, `overlay.error.log` |
+
+The overlay logs its lifecycle with timestamps: startup, connection to the
+daemon event stream, disconnects, and a `presenting ring at (x, y)` line for
+every invocation it renders. If the cursor hides on a Sense Panel press but no
+ring appears, the daemon is healthy and the overlay is not: check
+`service status` for `overlayLoaded: false`, read `overlay.error.log`, and run
+`service restart`.
 
 Every non-streaming command writes one JSON object to stdout. Diagnostics go to
 stderr, and failure classes have distinct nonzero exit codes, making the CLI
@@ -313,9 +333,12 @@ The production service uses these per-user paths:
 | Configuration | `~/Library/Application Support/Logi Liquid Controls/config.json` |
 | Diversion recovery journal | `~/Library/Application Support/Logi Liquid Controls/sense-panel-diversion.json` |
 | Installed daemon | `~/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-daemon` |
+| Installed overlay | `~/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-overlay` |
 | Daemon logs | `~/Library/Application Support/Logi Liquid Controls/logs/daemon.log` and `daemon.error.log` |
+| Overlay logs | `~/Library/Application Support/Logi Liquid Controls/logs/overlay.log` and `overlay.error.log` |
 | Control socket | `~/.logi-liquid-controls/run/mouse-control.sock` |
-| LaunchAgent | `~/Library/LaunchAgents/com.logiliquid.controls.daemon.plist` |
+| Daemon LaunchAgent | `~/Library/LaunchAgents/com.logiliquid.controls.daemon.plist` |
+| Overlay LaunchAgent | `~/Library/LaunchAgents/com.logiliquid.controls.overlay.plist` |
 
 The Application Support and socket directories are private (`0700`); the
 configuration, journal, and socket are user-only (`0600` where applicable).

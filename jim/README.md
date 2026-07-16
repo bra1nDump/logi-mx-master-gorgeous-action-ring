@@ -72,18 +72,26 @@ masking structural changes. The JSON result contains per-state maximum channel
 delta, changed-pixel ratio, baseline path, and pass/fail status. A snapshot
 mismatch exits with status 2; usage errors exit with status 64.
 
-## Render the transparent demo
+## Render the demo video
 
-Jim can also render the production `OverlayView` into the public looping GIF:
+Jim also renders the public demo: an H.264 MP4 of the production `OverlayView`
+composited over a deterministic macOS-style wallpaper, plus an optional poster
+still for the README:
 
 ```sh
-.build/release/jim demo --output docs/assets/command-bloom-demo.gif
+.build/release/jim demo \
+  --output docs/assets/command-bloom-demo.mp4 \
+  --poster docs/assets/command-bloom-demo-poster.png
 ```
 
-The default is 1200×800, 60 frames per second, and 3.2 seconds. Every frame is
-captured from Jim's dedicated transparent AppKit window; desktop content is
-never included. Grant Screen Recording access to the `jim` executable when
-macOS requests it.
+The default is 1280×800 at 60 frames per second and 2.8 seconds. The timeline
+opens on the wallpaper with the standard macOS pointer, shakes it with haptic
+ripples for the Sense Panel press, blooms the ring, travels to Core's exact
+latch-overlap boundary, performs the 160 ms suction, pulses the committed
+target, and dismisses back to the desktop so the video loops cleanly. The
+poster is the mid-suction frame. Every frame is captured from Jim's dedicated
+AppKit window; desktop content is never included. Grant Screen Recording
+access to the `jim` executable when macOS requests it.
 
 ## Tests
 
@@ -94,4 +102,5 @@ swift test --filter LogiLiquidJimTests
 The focused tests prove that scenarios use real Core transitions, hosted PNGs
 have exact output dimensions and nonempty pixel variation, the fixed backdrop
 reaches all four edges without cropped/black margins, record/verify works end to
-end, and the agent-facing `list` response remains stable JSON.
+end, the demo video is valid H.264 with the wallpaper covering every corner,
+and the agent-facing `list` response remains stable JSON.

@@ -60,18 +60,34 @@ final class OverlayEventStream: @unchecked Sendable {
   }
 
   private func runLoop() {
+    // Log connection-state transitions once instead of every retry, so an
+    // absent daemon does not flood the overlay log at the retry interval.
+    var lastFailureDescription: String?
     while isRunning {
       do {
         let subscription = try client.subscribe(method: .eventsFollow)
         lock.lock()
         self.subscription = subscription
         lock.unlock()
+        lastFailureDescription = nil
+        OverlayLog.log("connected to the daemon event stream")
 
         while isRunning, let event = try subscription.next() {
           handle(event)
         }
+        if isRunning {
+          OverlayLog.log("daemon event stream ended; reconnecting")
+        }
       } catch {
         // The daemon is not up yet, or the stream faulted. Fall through to retry.
+        let description = String(describing: error)
+        if description != lastFailureDescription {
+          lastFailureDescription = description
+          OverlayLog.log(
+            "daemon event stream unavailable (\(description)); "
+              + "retrying every \(retryInterval)s"
+          )
+        }
       }
 
       lock.lock()
@@ -91,8 +107,7 @@ final class OverlayEventStream: @unchecked Sendable {
         let frame = try Self.decodeFrame(from: event.payload)
         onEvent(.transition(frame))
       } catch {
-        let message = "logi-liquid-overlay: invalid ring.transition payload: \(error)\n"
-        FileHandle.standardError.write(Data(message.utf8))
+        OverlayLog.log("invalid ring.transition payload: \(error)")
       }
     case "daemon.device-error":
       // The device dropped; the interaction is over. Treat as a disconnect so

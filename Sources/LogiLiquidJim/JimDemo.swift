@@ -1,20 +1,20 @@
+import AVFoundation
 import AppKit
 import CoreGraphics
 import Foundation
-import ImageIO
 import LogiLiquidCore
 import LogiLiquidUI
 import QuartzCore
 import ScreenCaptureKit
 import SwiftUI
 
-/// Deterministic output settings for the transparent CommandBloom demo.
+/// Deterministic output settings for the CommandBloom demo video.
 public struct JimDemoConfiguration: Codable, Equatable, Sendable {
   public static let `default` = JimDemoConfiguration(
-    pixelWidth: 1_200,
+    pixelWidth: 1_280,
     pixelHeight: 800,
     framesPerSecond: 60,
-    duration: 3.2
+    duration: JimDemoTimeline.Timing.total
   )
 
   public let pixelWidth: Int
@@ -26,7 +26,7 @@ public struct JimDemoConfiguration: Codable, Equatable, Sendable {
     pixelWidth: Int,
     pixelHeight: Int,
     framesPerSecond: Int,
-    duration: Double = 3.2
+    duration: Double = JimDemoTimeline.Timing.total
   ) {
     self.pixelWidth = pixelWidth
     self.pixelHeight = pixelHeight
@@ -40,18 +40,6 @@ public struct JimDemoConfiguration: Codable, Equatable, Sendable {
 
   public var frameDelay: Double {
     1 / Double(framesPerSecond)
-  }
-
-  /// GIF timing is stored in centiseconds. Distributing adjacent centisecond
-  /// delays preserves the requested average frame rate without timing drift.
-  public func encodedFrameDelay(at index: Int) -> Double {
-    let startTick = Int(
-      (Double(index) * 100 / Double(framesPerSecond)).rounded(.down)
-    )
-    let endTick = Int(
-      (Double(index + 1) * 100 / Double(framesPerSecond)).rounded(.down)
-    )
-    return Double(max(1, endTick - startTick)) / 100
   }
 
   public func validate() throws {
@@ -74,7 +62,7 @@ public struct JimDemoConfiguration: Codable, Equatable, Sendable {
 private final class JimDemoWindowHost {
   private let timeline: JimDemoTimeline
   private let window: NSWindow
-  private let hostingView: NSHostingView<JimDemoOverlayScene>
+  private let hostingView: NSHostingView<JimDemoScene>
   private let shareableWindow: SCWindow
   private let captureConfiguration: SCStreamConfiguration
 
@@ -86,7 +74,7 @@ private final class JimDemoWindowHost {
     application.appearance = NSAppearance(named: .darkAqua)
     application.finishLaunching()
 
-    let firstScene = JimDemoOverlayScene(
+    let firstScene = JimDemoScene(
       frame: timeline.frame(at: 0),
       timeline: timeline
     )
@@ -99,7 +87,6 @@ private final class JimDemoWindowHost {
     )
     hostingView.frame = contentFrame
     hostingView.wantsLayer = true
-    hostingView.layer?.backgroundColor = NSColor.clear.cgColor
 
     window = NSWindow(
       contentRect: contentFrame,
@@ -108,8 +95,8 @@ private final class JimDemoWindowHost {
       defer: false
     )
     window.isReleasedWhenClosed = false
-    window.isOpaque = false
-    window.backgroundColor = .clear
+    window.isOpaque = true
+    window.backgroundColor = .black
     window.hasShadow = false
     window.ignoresMouseEvents = true
     window.appearance = NSAppearance(named: .darkAqua)
@@ -161,12 +148,11 @@ private final class JimDemoWindowHost {
     captureConfiguration.showsCursor = false
     captureConfiguration.capturesAudio = false
     captureConfiguration.ignoreShadowsSingleWindow = true
-    captureConfiguration.shouldBeOpaque = false
     try await Task.sleep(for: .milliseconds(100))
   }
 
   func capture(_ frame: JimDemoFrame) async throws -> CGImage {
-    hostingView.rootView = JimDemoOverlayScene(frame: frame, timeline: timeline)
+    hostingView.rootView = JimDemoScene(frame: frame, timeline: timeline)
     hostingView.layoutSubtreeIfNeeded()
     hostingView.needsDisplay = true
     hostingView.displayIfNeeded()
@@ -188,27 +174,37 @@ private final class JimDemoWindowHost {
   }
 }
 
-private struct JimDemoOverlayScene: View {
+/// The composed demo frame: a macOS-style wallpaper, the standard pointer, the
+/// Sense Panel buzz, and the production `OverlayView` on top.
+private struct JimDemoScene: View {
   let frame: JimDemoFrame
   let timeline: JimDemoTimeline
 
   var body: some View {
     let configuration = timeline.configuration
-    OverlayView(
-      model: model,
-      localOrigin: CGPoint(
-        x: CGFloat(configuration.pixelWidth) / 2,
-        y: CGFloat(configuration.pixelHeight) / 2
-      ),
-      presentationProgress: CGFloat(frame.presentationProgress),
-      onPrimaryClick: {}
-    )
-    .frame(
+    let size = CGSize(
       width: CGFloat(configuration.pixelWidth),
       height: CGFloat(configuration.pixelHeight)
     )
-    .scaleEffect(sceneScale)
-    .opacity(frame.overallOpacity)
+    let center = CGPoint(x: size.width / 2, y: size.height / 2)
+    ZStack {
+      JimDemoWallpaper()
+      ZStack {
+        OverlayView(
+          model: model,
+          localOrigin: center,
+          presentationProgress: CGFloat(frame.presentationProgress),
+          onPrimaryClick: {}
+        )
+        .opacity(frame.overallOpacity)
+        commitFlash(center: center)
+        buzzRipples(center: center)
+        pointer(center: center)
+      }
+      .frame(width: size.width, height: size.height)
+      .scaleEffect(sceneScale)
+    }
+    .frame(width: size.width, height: size.height)
     .transaction { transaction in
       transaction.animation = nil
       transaction.disablesAnimations = true
@@ -220,6 +216,60 @@ private struct JimDemoOverlayScene: View {
       CGFloat(timeline.configuration.pixelWidth) / 600,
       CGFloat(timeline.configuration.pixelHeight) / 400
     )
+  }
+
+  @ViewBuilder
+  private func pointer(center: CGPoint) -> some View {
+    if frame.cursorVisible {
+      let image = NSCursor.arrow.image
+      let hotSpot = NSCursor.arrow.hotSpot
+      Image(nsImage: image)
+        .shadow(color: .black.opacity(0.45), radius: 2, x: 0, y: 1)
+        .position(
+          x: center.x - hotSpot.x + (image.size.width / 2) + frame.cursorShakeOffset.x,
+          y: center.y - hotSpot.y + (image.size.height / 2) + frame.cursorShakeOffset.y
+        )
+    }
+  }
+
+  /// Two expanding rings around the pointer read as the Sense Panel's haptic
+  /// click without inventing UI the product does not have.
+  @ViewBuilder
+  private func buzzRipples(center: CGPoint) -> some View {
+    if frame.buzzProgress > 0 {
+      ForEach(0..<2, id: \.self) { ring in
+        let progress = min(max((frame.buzzProgress * 1.35) - (Double(ring) * 0.3), 0), 1)
+        if progress > 0 {
+          Circle()
+            .stroke(
+              Color.white.opacity((1 - progress) * 0.85),
+              lineWidth: 2.5 - CGFloat(progress)
+            )
+            .frame(
+              width: 26 + CGFloat(progress) * 74,
+              height: 26 + CGFloat(progress) * 74
+            )
+            .position(x: center.x, y: center.y)
+        }
+      }
+    }
+  }
+
+  @ViewBuilder
+  private func commitFlash(center: CGPoint) -> some View {
+    if frame.commitPulse > 0, frame.commitPulse < 1 {
+      let target = timeline.selectedTargetOffset
+      Circle()
+        .stroke(
+          OverlayTheme.violetStrong.opacity((1 - frame.commitPulse) * 0.8),
+          lineWidth: 3 * (1 - CGFloat(frame.commitPulse)) + 0.5
+        )
+        .frame(
+          width: OverlayTheme.targetBubbleDiameter * (1 + CGFloat(frame.commitPulse) * 0.9),
+          height: OverlayTheme.targetBubbleDiameter * (1 + CGFloat(frame.commitPulse) * 0.9)
+        )
+        .position(x: center.x + target.x, y: center.y + target.y)
+    }
   }
 
   private var model: OverlayRenderModel {
@@ -236,10 +286,10 @@ private struct JimDemoOverlayScene: View {
     }
     let phase: RingInteractionPhase =
       switch frame.phase {
+      case .desktop, .buzz: .idle
       case .invocation: .invoked
       case .travel: .tracking
       case .suction, .committed, .dismissing: .latched
-      case .hidden: .idle
       }
     return OverlayRenderModel(
       phase: phase,
@@ -252,13 +302,59 @@ private struct JimDemoOverlayScene: View {
   }
 }
 
+/// A deterministic macOS-style wallpaper: large soft color fields over a deep
+/// blue base, so the glass ring reads exactly as it does on a real desktop
+/// without ever capturing the user's actual screen.
+private struct JimDemoWallpaper: View {
+  var body: some View {
+    GeometryReader { proxy in
+      let size = proxy.size
+      ZStack {
+        LinearGradient(
+          colors: [
+            Color(red: 0.09, green: 0.13, blue: 0.32),
+            Color(red: 0.16, green: 0.11, blue: 0.38),
+            Color(red: 0.05, green: 0.09, blue: 0.24),
+          ],
+          startPoint: .top,
+          endPoint: .bottom
+        )
+        Ellipse()
+          .fill(Color(red: 0.86, green: 0.32, blue: 0.55).opacity(0.55))
+          .frame(width: size.width * 0.9, height: size.height * 0.7)
+          .blur(radius: size.width * 0.09)
+          .offset(x: -size.width * 0.32, y: -size.height * 0.34)
+        Ellipse()
+          .fill(Color(red: 0.35, green: 0.42, blue: 0.95).opacity(0.6))
+          .frame(width: size.width * 1.0, height: size.height * 0.8)
+          .blur(radius: size.width * 0.1)
+          .offset(x: size.width * 0.36, y: -size.height * 0.18)
+        Ellipse()
+          .fill(Color(red: 0.16, green: 0.65, blue: 0.72).opacity(0.5))
+          .frame(width: size.width * 0.95, height: size.height * 0.75)
+          .blur(radius: size.width * 0.1)
+          .offset(x: size.width * 0.12, y: size.height * 0.42)
+        Ellipse()
+          .fill(Color(red: 0.55, green: 0.30, blue: 0.85).opacity(0.45))
+          .frame(width: size.width * 0.8, height: size.height * 0.6)
+          .blur(radius: size.width * 0.09)
+          .offset(x: -size.width * 0.3, y: size.height * 0.36)
+      }
+      .frame(width: size.width, height: size.height)
+      .clipped()
+    }
+    .ignoresSafeArea()
+  }
+}
+
 public enum JimDemoPhase: String, CaseIterable, Sendable {
+  case desktop
+  case buzz
   case invocation
   case travel
   case suction
   case committed
   case dismissing
-  case hidden
 }
 
 /// One deterministic visual frame. Geometry remains in the production
@@ -271,7 +367,9 @@ public struct JimDemoFrame: Equatable, Sendable {
   public let bubbleOffset: CGPoint
   public let mergeProgress: Double
   public let selectionStrength: Double
-  public let invocationPulse: Double
+  public let cursorVisible: Bool
+  public let cursorShakeOffset: CGPoint
+  public let buzzProgress: Double
   public let commitPulse: Double
 
   public init(
@@ -282,8 +380,10 @@ public struct JimDemoFrame: Equatable, Sendable {
     bubbleOffset: CGPoint,
     mergeProgress: Double,
     selectionStrength: Double,
-    invocationPulse: Double,
-    commitPulse: Double
+    cursorVisible: Bool,
+    cursorShakeOffset: CGPoint = .zero,
+    buzzProgress: Double = 0,
+    commitPulse: Double = 0
   ) {
     self.index = index
     self.phase = phase
@@ -292,22 +392,29 @@ public struct JimDemoFrame: Equatable, Sendable {
     self.bubbleOffset = bubbleOffset
     self.mergeProgress = mergeProgress
     self.selectionStrength = selectionStrength
-    self.invocationPulse = invocationPulse
+    self.cursorVisible = cursorVisible
+    self.cursorShakeOffset = cursorShakeOffset
+    self.buzzProgress = buzzProgress
     self.commitPulse = commitPulse
   }
 }
 
-/// A clock-free animation authored from the real Core/Jim scenarios. It starts
-/// at a transparent frame, invokes the bloom, moves to Core's configured overlap
-/// boundary, performs the 160 ms suction, commits, and dismisses to transparent.
+/// A clock-free animation authored from the real Core/Jim scenarios. It opens
+/// on a desktop with the standard pointer, buzzes for the Sense Panel press,
+/// blooms the ring, travels to Core's configured overlap boundary, performs the
+/// 160 ms suction, commits, and dismisses back to the desktop so the video
+/// loops cleanly.
 public struct JimDemoTimeline: Sendable {
-  private enum Timing {
-    static let invocationEnd = 0.48
-    static let travelStart = 0.62
-    static let travelEnd = 1.62
-    static let suctionEnd = 1.78
-    static let dismissStart = 2.24
-    static let dismissEnd = 2.62
+  public enum Timing {
+    public static let cursorIntroEnd = 0.32
+    public static let buzzEnd = 0.72
+    public static let invocationEnd = 1.04
+    public static let travelStart = 1.12
+    public static let travelEnd = 1.68
+    public static let suctionEnd = 1.84
+    public static let dismissStart = 2.16
+    public static let dismissEnd = 2.48
+    public static let total = 2.8
   }
 
   public let configuration: JimDemoConfiguration
@@ -342,8 +449,36 @@ public struct JimDemoTimeline: Sendable {
     let clampedIndex = min(max(index, 0), configuration.frameCount - 1)
     let time = Double(clampedIndex) / Double(configuration.framesPerSecond)
 
+    if time < Timing.cursorIntroEnd {
+      return desktopFrame(index: clampedIndex)
+    }
+
+    if time < Timing.buzzEnd {
+      let progress = (time - Timing.cursorIntroEnd) / (Timing.buzzEnd - Timing.cursorIntroEnd)
+      // A decaying shake sells the physical Sense Panel click.
+      let decay = 1 - Self.smoothstep(progress)
+      let shake = CGPoint(
+        x: 3.4 * sin(progress * .pi * 9) * decay,
+        y: 1.2 * sin(progress * .pi * 13) * decay
+      )
+      return JimDemoFrame(
+        index: clampedIndex,
+        phase: .buzz,
+        presentationProgress: 0,
+        overallOpacity: 0,
+        bubbleOffset: .zero,
+        mergeProgress: 0,
+        selectionStrength: 0,
+        cursorVisible: true,
+        cursorShakeOffset: shake,
+        buzzProgress: progress
+      )
+    }
+
     if time < Timing.invocationEnd {
-      let progress = Self.smoothstep(time / Timing.invocationEnd)
+      let progress = Self.smoothstep(
+        (time - Timing.buzzEnd) / (Timing.invocationEnd - Timing.buzzEnd)
+      )
       return JimDemoFrame(
         index: clampedIndex,
         phase: .invocation,
@@ -352,13 +487,21 @@ public struct JimDemoTimeline: Sendable {
         bubbleOffset: .zero,
         mergeProgress: 0,
         selectionStrength: 0,
-        invocationPulse: progress,
-        commitPulse: 0
+        cursorVisible: false
       )
     }
 
     if time < Timing.travelStart {
-      return steadyFrame(index: clampedIndex, phase: .invocation)
+      return JimDemoFrame(
+        index: clampedIndex,
+        phase: .invocation,
+        presentationProgress: 1,
+        overallOpacity: 1,
+        bubbleOffset: .zero,
+        mergeProgress: 0,
+        selectionStrength: 0,
+        cursorVisible: false
+      )
     }
 
     if time < Timing.travelEnd {
@@ -380,8 +523,7 @@ public struct JimDemoTimeline: Sendable {
         bubbleOffset: offset,
         mergeProgress: mergeProgress(at: offset),
         selectionStrength: Self.smoothstep((progress - 0.08) / 0.28),
-        invocationPulse: 1,
-        commitPulse: 0
+        cursorVisible: false
       )
     }
 
@@ -398,8 +540,7 @@ public struct JimDemoTimeline: Sendable {
         bubbleOffset: Self.interpolate(latchThresholdOffset, selectedTargetOffset, progress),
         mergeProgress: Self.interpolate(thresholdMerge, 1, progress),
         selectionStrength: 1,
-        invocationPulse: 1,
-        commitPulse: 0
+        cursorVisible: false
       )
     }
 
@@ -413,7 +554,7 @@ public struct JimDemoTimeline: Sendable {
         bubbleOffset: selectedTargetOffset,
         mergeProgress: 1,
         selectionStrength: 1,
-        invocationPulse: 1,
+        cursorVisible: false,
         commitPulse: min(max(progress, 0), 1)
       )
     }
@@ -430,35 +571,24 @@ public struct JimDemoTimeline: Sendable {
         bubbleOffset: selectedTargetOffset,
         mergeProgress: 1,
         selectionStrength: 1 - progress,
-        invocationPulse: 1,
+        cursorVisible: true,
         commitPulse: 1
       )
     }
 
-    return JimDemoFrame(
-      index: clampedIndex,
-      phase: .hidden,
+    return desktopFrame(index: clampedIndex)
+  }
+
+  private func desktopFrame(index: Int) -> JimDemoFrame {
+    JimDemoFrame(
+      index: index,
+      phase: .desktop,
       presentationProgress: 0,
       overallOpacity: 0,
       bubbleOffset: .zero,
       mergeProgress: 0,
       selectionStrength: 0,
-      invocationPulse: 0,
-      commitPulse: 0
-    )
-  }
-
-  private func steadyFrame(index: Int, phase: JimDemoPhase) -> JimDemoFrame {
-    JimDemoFrame(
-      index: index,
-      phase: phase,
-      presentationProgress: 1,
-      overallOpacity: 1,
-      bubbleOffset: .zero,
-      mergeProgress: 0,
-      selectionStrength: 0,
-      invocationPulse: 1,
-      commitPulse: 0
+      cursorVisible: true
     )
   }
 
@@ -501,22 +631,22 @@ public struct JimDemoArtifact: Codable, Equatable, Sendable {
   public let pixelWidth: Int
   public let pixelHeight: Int
   public let frameCount: Int
-  public let loopCount: Int
-  public let frameDelay: Double
+  public let duration: Double
   public let byteCount: Int
-  public let hasTransparentBackground: Bool
+  public let isH264: Bool
+  public let hasOpaqueBackground: Bool
 }
 
 /// Native Jim renderer for the production `OverlayView`. It captures only its
-/// dedicated transparent AppKit window; desktop windows are never in scope.
+/// dedicated AppKit window; desktop windows are never in scope. The output is
+/// a high-quality H.264 MP4 suitable for GitHub and the project site.
 @MainActor
 public final class JimDemoRenderer {
-  private static let gifType = "com.compuserve.gif" as CFString
-
   public init() {}
 
   public func render(
     to output: URL,
+    poster posterURL: URL? = nil,
     configuration: JimDemoConfiguration = .default
   ) async throws -> JimDemoArtifact {
     let timeline = try JimDemoTimeline(configuration: configuration)
@@ -526,119 +656,227 @@ public final class JimDemoRenderer {
     )
     try? FileManager.default.removeItem(at: output)
 
-    guard
-      let destination = CGImageDestinationCreateWithURL(
-        output as CFURL,
-        Self.gifType,
-        configuration.frameCount,
-        nil
-      )
-    else {
-      throw JimError.gifDestinationCreationFailed
+    let writer: AVAssetWriter
+    do {
+      writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
+    } catch {
+      throw JimError.videoWriterCreationFailed(String(describing: error))
     }
-
-    CGImageDestinationSetProperties(
-      destination,
-      [
-        kCGImagePropertyGIFDictionary: [
-          kCGImagePropertyGIFLoopCount: 0
-        ]
-      ] as CFDictionary
+    let input = AVAssetWriterInput(
+      mediaType: .video,
+      outputSettings: [
+        AVVideoCodecKey: AVVideoCodecType.h264,
+        AVVideoWidthKey: configuration.pixelWidth,
+        AVVideoHeightKey: configuration.pixelHeight,
+        AVVideoCompressionPropertiesKey: [
+          AVVideoAverageBitRateKey: 10_000_000,
+          AVVideoProfileLevelKey: AVVideoProfileLevelH264HighAutoLevel,
+          AVVideoExpectedSourceFrameRateKey: configuration.framesPerSecond,
+          AVVideoMaxKeyFrameIntervalKey: configuration.framesPerSecond * 2,
+        ],
+      ]
     )
+    input.expectsMediaDataInRealTime = false
+    let adaptor = AVAssetWriterInputPixelBufferAdaptor(
+      assetWriterInput: input,
+      sourcePixelBufferAttributes: [
+        kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA,
+        kCVPixelBufferWidthKey as String: configuration.pixelWidth,
+        kCVPixelBufferHeightKey as String: configuration.pixelHeight,
+      ]
+    )
+    writer.add(input)
+    guard writer.startWriting() else {
+      throw JimError.videoEncodingFailed(String(describing: writer.error))
+    }
+    writer.startSession(atSourceTime: .zero)
+
+    // The poster is the mid-suction moment: the bubble fusing into the
+    // selected target tells the whole story in one still.
+    let posterTime = (JimDemoTimeline.Timing.travelEnd + JimDemoTimeline.Timing.suctionEnd) / 2
+    let posterIndex = min(
+      configuration.frameCount - 1,
+      Int((posterTime * Double(configuration.framesPerSecond)).rounded())
+    )
+
     let host = try await JimDemoWindowHost(timeline: timeline)
     defer { host.close() }
     for index in 0..<configuration.frameCount {
       let image = try await host.capture(timeline.frame(at: index))
-      let delay = configuration.encodedFrameDelay(at: index)
-      let frameProperties =
-        [
-          kCGImagePropertyGIFDictionary: [
-            kCGImagePropertyGIFDelayTime: delay,
-            kCGImagePropertyGIFUnclampedDelayTime: delay,
-          ]
-        ] as CFDictionary
-      CGImageDestinationAddImage(destination, image, frameProperties)
+      if index == posterIndex, let posterURL {
+        try Self.writePNG(image, to: posterURL)
+      }
+      while !input.isReadyForMoreMediaData {
+        try await Task.sleep(for: .milliseconds(4))
+      }
+      let buffer = try Self.makePixelBuffer(
+        from: image,
+        pool: adaptor.pixelBufferPool,
+        width: configuration.pixelWidth,
+        height: configuration.pixelHeight
+      )
+      guard
+        adaptor.append(
+          buffer,
+          withPresentationTime: CMTime(
+            value: CMTimeValue(index),
+            timescale: CMTimeScale(configuration.framesPerSecond)
+          )
+        )
+      else {
+        throw JimError.videoEncodingFailed(String(describing: writer.error))
+      }
     }
-    guard CGImageDestinationFinalize(destination) else {
-      throw JimError.gifEncodingFailed
+    input.markAsFinished()
+    await writer.finishWriting()
+    guard writer.status == .completed else {
+      throw JimError.videoEncodingFailed(String(describing: writer.error))
     }
 
-    let artifact = try Self.inspect(output)
+    let artifact = try await Self.inspect(output)
     guard artifact.pixelWidth == configuration.pixelWidth,
       artifact.pixelHeight == configuration.pixelHeight,
       artifact.frameCount == configuration.frameCount,
-      artifact.loopCount == 0,
-      abs(artifact.frameDelay - configuration.frameDelay) < 0.001
+      abs(artifact.duration - configuration.duration) < 0.05,
+      artifact.isH264
     else {
-      throw JimError.invalidGIF
+      throw JimError.invalidVideo
     }
-    guard artifact.hasTransparentBackground else {
-      throw JimError.opaqueGIFBackground
+    guard artifact.hasOpaqueBackground else {
+      throw JimError.demoBackgroundMissing
     }
     return artifact
   }
 
-  public static func inspect(_ url: URL) throws -> JimDemoArtifact {
-    guard
-      let source = CGImageSourceCreateWithURL(url as CFURL, nil),
-      CGImageSourceGetType(source) == Self.gifType,
-      let first = CGImageSourceCreateImageAtIndex(source, 0, nil)
-    else {
-      throw JimError.invalidGIF
+  public static func inspect(_ url: URL) async throws -> JimDemoArtifact {
+    let asset = AVURLAsset(url: url)
+    guard let track = try await asset.loadTracks(withMediaType: .video).first else {
+      throw JimError.invalidVideo
     }
-    let frameCount = CGImageSourceGetCount(source)
-    let globalProperties =
-      CGImageSourceCopyProperties(source, nil) as? [CFString: Any]
-    let gifProperties =
-      globalProperties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-    let loopCount = (gifProperties?[kCGImagePropertyGIFLoopCount] as? NSNumber)?.intValue ?? -1
-    var totalFrameDelay = 0.0
-    for index in 0..<frameCount {
-      let properties =
-        CGImageSourceCopyPropertiesAtIndex(source, index, nil) as? [CFString: Any]
-      let gifFrameProperties =
-        properties?[kCGImagePropertyGIFDictionary] as? [CFString: Any]
-      guard
-        let delay =
-          (gifFrameProperties?[kCGImagePropertyGIFUnclampedDelayTime] as? NSNumber)?.doubleValue
-          ?? (gifFrameProperties?[kCGImagePropertyGIFDelayTime] as? NSNumber)?.doubleValue,
-        delay > 0
-      else {
-        throw JimError.invalidGIF
-      }
-      totalFrameDelay += delay
+    let (naturalSize, formatDescriptions) = try await track.load(.naturalSize, .formatDescriptions)
+    let duration = try await asset.load(.duration).seconds
+    let isH264 = formatDescriptions.contains { description in
+      CMFormatDescriptionGetMediaSubType(description) == kCMVideoCodecType_H264
     }
-    let frameDelay = frameCount > 0 ? totalFrameDelay / Double(frameCount) : 0
 
-    var hasTransparentBackground = true
-    for index in 0..<frameCount {
-      guard let image = CGImageSourceCreateImageAtIndex(source, index, nil) else {
-        throw JimError.invalidGIF
-      }
-      let bitmap = NSBitmapImageRep(cgImage: image)
-      let corners = [
-        (0, 0),
-        (image.width - 1, 0),
-        (0, image.height - 1),
-        (image.width - 1, image.height - 1),
-      ]
-      if corners.contains(where: { x, y in
-        (bitmap.colorAt(x: x, y: y)?.alphaComponent ?? 1) >= 0.01
-      }) {
-        hasTransparentBackground = false
-        break
+    let reader = try AVAssetReader(asset: asset)
+    let readerOutput = AVAssetReaderTrackOutput(
+      track: track,
+      outputSettings: [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_32BGRA]
+    )
+    reader.add(readerOutput)
+    guard reader.startReading() else {
+      throw JimError.invalidVideo
+    }
+    var frameCount = 0
+    var middleFrame: CVPixelBuffer?
+    while let sample = readerOutput.copyNextSampleBuffer() {
+      if CMSampleBufferGetNumSamples(sample) > 0 {
+        frameCount += 1
+        let sampleTime = CMSampleBufferGetPresentationTimeStamp(sample).seconds
+        if middleFrame == nil, sampleTime >= duration / 2 {
+          middleFrame = CMSampleBufferGetImageBuffer(sample)
+        }
       }
     }
+    guard reader.status == .completed, let middleFrame else {
+      throw JimError.invalidVideo
+    }
+
     let byteCount = try Data(contentsOf: url, options: [.mappedIfSafe]).count
     return JimDemoArtifact(
       url: url,
-      pixelWidth: first.width,
-      pixelHeight: first.height,
+      pixelWidth: Int(naturalSize.width.rounded()),
+      pixelHeight: Int(naturalSize.height.rounded()),
       frameCount: frameCount,
-      loopCount: loopCount,
-      frameDelay: frameDelay,
+      duration: duration,
       byteCount: byteCount,
-      hasTransparentBackground: hasTransparentBackground
+      isH264: isH264,
+      hasOpaqueBackground: Self.cornersAreLit(middleFrame)
     )
+  }
+
+  /// The wallpaper must reach every corner of every frame; a black corner
+  /// means the backdrop failed to cover the canvas.
+  private static func cornersAreLit(_ buffer: CVPixelBuffer) -> Bool {
+    CVPixelBufferLockBaseAddress(buffer, .readOnly)
+    defer { CVPixelBufferUnlockBaseAddress(buffer, .readOnly) }
+    guard let base = CVPixelBufferGetBaseAddress(buffer) else { return false }
+    let width = CVPixelBufferGetWidth(buffer)
+    let height = CVPixelBufferGetHeight(buffer)
+    let bytesPerRow = CVPixelBufferGetBytesPerRow(buffer)
+    let inset = max(1, min(width, height) / 64)
+    let corners = [
+      (inset, inset),
+      (width - inset - 1, inset),
+      (inset, height - inset - 1),
+      (width - inset - 1, height - inset - 1),
+    ]
+    return corners.allSatisfy { x, y in
+      let pixel = base.advanced(by: (y * bytesPerRow) + (x * 4))
+        .assumingMemoryBound(to: UInt8.self)
+      // BGRA: any channel comfortably above black proves wallpaper coverage.
+      return max(pixel[0], max(pixel[1], pixel[2])) > 8
+    }
+  }
+
+  private static func writePNG(_ image: CGImage, to url: URL) throws {
+    try FileManager.default.createDirectory(
+      at: url.deletingLastPathComponent(),
+      withIntermediateDirectories: true
+    )
+    let bitmap = NSBitmapImageRep(cgImage: image)
+    guard let data = bitmap.representation(using: .png, properties: [:]) else {
+      throw JimError.pngEncodingFailed
+    }
+    try data.write(to: url, options: .atomic)
+  }
+
+  private static func makePixelBuffer(
+    from image: CGImage,
+    pool: CVPixelBufferPool?,
+    width: Int,
+    height: Int
+  ) throws -> CVPixelBuffer {
+    var buffer: CVPixelBuffer?
+    if let pool {
+      CVPixelBufferPoolCreatePixelBuffer(nil, pool, &buffer)
+    }
+    if buffer == nil {
+      CVPixelBufferCreate(
+        nil,
+        width,
+        height,
+        kCVPixelFormatType_32BGRA,
+        [
+          kCVPixelBufferWidthKey: width,
+          kCVPixelBufferHeightKey: height,
+        ] as CFDictionary,
+        &buffer
+      )
+    }
+    guard let buffer else {
+      throw JimError.pixelBufferCreationFailed
+    }
+
+    CVPixelBufferLockBaseAddress(buffer, [])
+    defer { CVPixelBufferUnlockBaseAddress(buffer, []) }
+    guard
+      let context = CGContext(
+        data: CVPixelBufferGetBaseAddress(buffer),
+        width: width,
+        height: height,
+        bitsPerComponent: 8,
+        bytesPerRow: CVPixelBufferGetBytesPerRow(buffer),
+        space: CGColorSpace(name: CGColorSpace.sRGB)!,
+        bitmapInfo: CGImageAlphaInfo.premultipliedFirst.rawValue
+          | CGBitmapInfo.byteOrder32Little.rawValue
+      )
+    else {
+      throw JimError.pixelBufferCreationFailed
+    }
+    context.interpolationQuality = .high
+    context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+    return buffer
   }
 }

@@ -27,7 +27,7 @@ public struct JimCLI {
       jim render --state STATE --output FILE [--width N --height N --scale N]
       jim record [--directory DIR] [--width N --height N --scale N]
       jim verify [--directory DIR]
-      jim demo --output FILE [--width N --height N --fps N]
+      jim demo --output FILE.mp4 [--poster FILE.png] [--width N --height N --fps N]
 
     states: \(JimSnapshotState.allCases.map(\.rawValue).joined(separator: ", "))
     default snapshot directory: jim/Snapshots
@@ -131,16 +131,24 @@ public struct JimCLI {
       case "demo":
         let options = try ParsedOptions(Array(arguments.dropFirst()))
         guard let rawOutput = options.value(for: "--output") else {
-          throw JimError.usage("demo requires --output FILE")
+          throw JimError.usage("demo requires --output FILE.mp4")
         }
-        try options.rejectUnknown(allowing: ["--output", "--width", "--height", "--fps"])
+        try options.rejectUnknown(allowing: [
+          "--output", "--poster", "--width", "--height", "--fps",
+        ])
         let output = absoluteURL(rawOutput)
+        let poster = options.value(for: "--poster").map(absoluteURL)
         _ = try await JimDemoRenderer().render(
           to: output,
+          poster: poster,
           configuration: try options.demoConfiguration()
         )
         return try emit(
-          JimCLIOutput(command: "demo", ok: true, files: [output.path]),
+          JimCLIOutput(
+            command: "demo",
+            ok: true,
+            files: [output.path] + (poster.map { [$0.path] } ?? [])
+          ),
           to: standardOutput
         )
 

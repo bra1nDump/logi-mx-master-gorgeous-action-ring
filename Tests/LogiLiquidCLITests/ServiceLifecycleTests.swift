@@ -5,15 +5,19 @@ import XCTest
 @testable import LogiLiquidCLI
 
 final class ServiceLifecycleTests: XCTestCase {
-  func testInstallAtomicallyCopiesDaemonWritesPlistAndBootstrapsUnloadedService() throws {
+  func testInstallAtomicallyCopiesExecutablesWritesPlistsAndBootstrapsUnloadedServices() throws {
     let fixture = makeFixture(
       processResults: [
+        ServiceProcessResult(terminationStatus: 113, output: "service not found"),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 113, output: "service not found"),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
       ]
     )
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceDaemonURL.path)
+    fixture.fileSystem.executablePaths.insert(fixture.paths.sourceOverlayURL.path)
 
     let result = try fixture.controller.perform(.install)
 
@@ -29,7 +33,9 @@ final class ServiceLifecycleTests: XCTestCase {
         "directory:\(fixture.paths.logsDirectory.path):448",
         "directory:\(fixture.paths.launchAgentsDirectory.path):493",
         "copy:\(fixture.paths.sourceDaemonURL.path):\(fixture.paths.installedDaemonURL.path)",
+        "copy:\(fixture.paths.sourceOverlayURL.path):\(fixture.paths.installedOverlayURL.path)",
         "write:\(fixture.paths.launchAgentURL.path):384",
+        "write:\(fixture.paths.overlayLaunchAgentURL.path):384",
       ]
     )
     XCTAssertEqual(
@@ -48,6 +54,20 @@ final class ServiceLifecycleTests: XCTestCase {
         LaunchctlInvocation(
           executableURL: fixture.paths.launchctlURL,
           arguments: ["kickstart", "-k", fixture.paths.launchdTarget]
+        ),
+        LaunchctlInvocation(
+          executableURL: fixture.paths.launchctlURL,
+          arguments: ["print", fixture.paths.overlayLaunchdTarget]
+        ),
+        LaunchctlInvocation(
+          executableURL: fixture.paths.launchctlURL,
+          arguments: [
+            "bootstrap", fixture.paths.launchdDomain, fixture.paths.overlayLaunchAgentURL.path,
+          ]
+        ),
+        LaunchctlInvocation(
+          executableURL: fixture.paths.launchctlURL,
+          arguments: ["kickstart", "-k", fixture.paths.overlayLaunchdTarget]
         ),
       ]
     )
@@ -72,12 +92,40 @@ final class ServiceLifecycleTests: XCTestCase {
     XCTAssertEqual(plist["KeepAlive"] as? Bool, true)
     XCTAssertEqual(plist["ProcessType"] as? String, "Interactive")
     XCTAssertEqual(plist["LimitLoadToSessionType"] as? String, "Aqua")
+
+    let overlayPlistData = try XCTUnwrap(
+      fixture.fileSystem.writtenData[fixture.paths.overlayLaunchAgentURL.path]
+    )
+    let overlayPlist = try XCTUnwrap(
+      PropertyListSerialization.propertyList(from: overlayPlistData, format: nil)
+        as? [String: Any]
+    )
+    XCTAssertEqual(overlayPlist["Label"] as? String, ServiceLifecyclePaths.overlayLabel)
+    XCTAssertEqual(
+      overlayPlist["ProgramArguments"] as? [String],
+      [fixture.paths.installedOverlayURL.path]
+    )
+    XCTAssertEqual(overlayPlist["RunAtLoad"] as? Bool, true)
+    XCTAssertEqual(overlayPlist["KeepAlive"] as? Bool, true)
+    XCTAssertEqual(overlayPlist["LimitLoadToSessionType"] as? String, "Aqua")
+    XCTAssertEqual(
+      overlayPlist["StandardOutPath"] as? String,
+      fixture.paths.logsDirectory.appending(path: "overlay.log").path
+    )
+    XCTAssertEqual(
+      overlayPlist["StandardErrorPath"] as? String,
+      fixture.paths.logsDirectory.appending(path: "overlay.error.log").path
+    )
     XCTAssertFalse(fixture.fileSystem.existingPaths.contains(fixture.paths.configurationURL.path))
   }
 
-  func testInstallBootsOutLoadedVersionBeforeBootstrapAndKickstart() throws {
+  func testInstallBootsOutLoadedVersionsBeforeBootstrapAndKickstart() throws {
     let fixture = makeFixture(
       processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
@@ -85,6 +133,7 @@ final class ServiceLifecycleTests: XCTestCase {
       ]
     )
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceDaemonURL.path)
+    fixture.fileSystem.executablePaths.insert(fixture.paths.sourceOverlayURL.path)
 
     _ = try fixture.controller.perform(.install)
 
@@ -95,6 +144,10 @@ final class ServiceLifecycleTests: XCTestCase {
         ["bootout", fixture.paths.launchdTarget],
         ["bootstrap", fixture.paths.launchdDomain, fixture.paths.launchAgentURL.path],
         ["kickstart", "-k", fixture.paths.launchdTarget],
+        ["print", fixture.paths.overlayLaunchdTarget],
+        ["bootout", fixture.paths.overlayLaunchdTarget],
+        ["bootstrap", fixture.paths.launchdDomain, fixture.paths.overlayLaunchAgentURL.path],
+        ["kickstart", "-k", fixture.paths.overlayLaunchdTarget],
       ]
     )
   }
@@ -102,6 +155,9 @@ final class ServiceLifecycleTests: XCTestCase {
   func testStartAndRestartBootstrapOnlyWhenUnloaded() throws {
     let start = makeInstalledFixture(
       processResults: [
+        ServiceProcessResult(terminationStatus: 113),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 113),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
@@ -114,11 +170,16 @@ final class ServiceLifecycleTests: XCTestCase {
         ["print", start.paths.launchdTarget],
         ["bootstrap", start.paths.launchdDomain, start.paths.launchAgentURL.path],
         ["kickstart", "-k", start.paths.launchdTarget],
+        ["print", start.paths.overlayLaunchdTarget],
+        ["bootstrap", start.paths.launchdDomain, start.paths.overlayLaunchAgentURL.path],
+        ["kickstart", "-k", start.paths.overlayLaunchdTarget],
       ]
     )
 
     let restart = makeInstalledFixture(
       processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
       ]
@@ -129,33 +190,62 @@ final class ServiceLifecycleTests: XCTestCase {
       [
         ["print", restart.paths.launchdTarget],
         ["kickstart", "-k", restart.paths.launchdTarget],
+        ["print", restart.paths.overlayLaunchdTarget],
+        ["kickstart", "-k", restart.paths.overlayLaunchdTarget],
       ]
     )
   }
 
   func testStopAndStatusTreatAnAbsentLaunchdJobAsStateNotFailure() throws {
     let stop = makeInstalledFixture(
-      processResults: [ServiceProcessResult(terminationStatus: 113)]
+      processResults: [
+        ServiceProcessResult(terminationStatus: 113),
+        ServiceProcessResult(terminationStatus: 113),
+      ]
     )
     let stopResult = try stop.controller.perform(.stop)
     XCTAssertTrue(stopResult.installed)
     XCTAssertFalse(stopResult.loaded)
     XCTAssertEqual(
       stop.processRunner.invocations.map(\.arguments),
-      [["print", stop.paths.launchdTarget]]
+      [
+        ["print", stop.paths.launchdTarget],
+        ["print", stop.paths.overlayLaunchdTarget],
+      ]
     )
 
     let status = makeFixture(
-      processResults: [ServiceProcessResult(terminationStatus: 113)]
+      processResults: [
+        ServiceProcessResult(terminationStatus: 113),
+        ServiceProcessResult(terminationStatus: 113),
+      ]
     )
     let statusResult = try status.controller.perform(.status)
     XCTAssertFalse(statusResult.installed)
     XCTAssertFalse(statusResult.loaded)
   }
 
+  func testStatusReportsDaemonAndOverlayLoadStatesSeparately() throws {
+    // The exact "cursor hides but no ring appears" failure: the daemon runs
+    // while the overlay job is gone.
+    let fixture = makeInstalledFixture(
+      processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
+      ]
+    )
+    let result = try fixture.controller.perform(.status)
+    XCTAssertTrue(result.installed)
+    XCTAssertTrue(result.daemonLoaded)
+    XCTAssertFalse(result.overlayLoaded)
+    XCTAssertFalse(result.loaded)
+  }
+
   func testUninstallBootsOutAndRemovesOnlyManagedFilesKeepingConfiguration() throws {
     let fixture = makeInstalledFixture(
       processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
       ]
@@ -171,6 +261,8 @@ final class ServiceLifecycleTests: XCTestCase {
       [
         ["print", fixture.paths.launchdTarget],
         ["bootout", fixture.paths.launchdTarget],
+        ["print", fixture.paths.overlayLaunchdTarget],
+        ["bootout", fixture.paths.overlayLaunchdTarget],
       ]
     )
     XCTAssertEqual(
@@ -178,21 +270,33 @@ final class ServiceLifecycleTests: XCTestCase {
       [
         "remove:\(fixture.paths.launchAgentURL.path)",
         "remove:\(fixture.paths.installedDaemonURL.path)",
+        "remove:\(fixture.paths.overlayLaunchAgentURL.path)",
+        "remove:\(fixture.paths.installedOverlayURL.path)",
       ]
     )
     XCTAssertTrue(fixture.fileSystem.existingPaths.contains(fixture.paths.configurationURL.path))
   }
 
-  func testMissingInstallSourceAndLaunchctlFailuresAreStructured() throws {
-    let missingSource = makeFixture(processResults: [])
-    XCTAssertThrowsError(try missingSource.controller.perform(.install)) { error in
+  func testMissingInstallSourcesAndLaunchctlFailuresAreStructured() throws {
+    let missingDaemon = makeFixture(processResults: [])
+    XCTAssertThrowsError(try missingDaemon.controller.perform(.install)) { error in
       XCTAssertEqual(
         error as? ServiceLifecycleError,
-        .daemonExecutableMissing(missingSource.paths.sourceDaemonURL.path)
+        .daemonExecutableMissing(missingDaemon.paths.sourceDaemonURL.path)
       )
     }
-    XCTAssertTrue(missingSource.fileSystem.operations.isEmpty)
-    XCTAssertTrue(missingSource.processRunner.invocations.isEmpty)
+    XCTAssertTrue(missingDaemon.fileSystem.operations.isEmpty)
+    XCTAssertTrue(missingDaemon.processRunner.invocations.isEmpty)
+
+    let missingOverlay = makeFixture(processResults: [])
+    missingOverlay.fileSystem.executablePaths.insert(missingOverlay.paths.sourceDaemonURL.path)
+    XCTAssertThrowsError(try missingOverlay.controller.perform(.install)) { error in
+      XCTAssertEqual(
+        error as? ServiceLifecycleError,
+        .overlayExecutableMissing(missingOverlay.paths.sourceOverlayURL.path)
+      )
+    }
+    XCTAssertTrue(missingOverlay.fileSystem.operations.isEmpty)
 
     let bootstrapFailure = makeInstalledFixture(
       processResults: [
@@ -244,6 +348,8 @@ final class ServiceLifecycleTests: XCTestCase {
     fixture.fileSystem.existingPaths.formUnion([
       fixture.paths.installedDaemonURL.path,
       fixture.paths.launchAgentURL.path,
+      fixture.paths.installedOverlayURL.path,
+      fixture.paths.overlayLaunchAgentURL.path,
     ])
     return fixture
   }
@@ -280,10 +386,15 @@ final class ServiceLifecycleTests: XCTestCase {
       operation: operation,
       installed: installed,
       loaded: loaded,
+      daemonLoaded: loaded,
+      overlayLoaded: loaded,
       daemonExecutablePath: paths.installedDaemonURL.path,
+      overlayExecutablePath: paths.installedOverlayURL.path,
       launchAgentPath: paths.launchAgentURL.path,
+      overlayLaunchAgentPath: paths.overlayLaunchAgentURL.path,
       configurationPath: paths.configurationURL.path,
-      socketPath: paths.socketURL.path
+      socketPath: paths.socketURL.path,
+      logsPath: paths.logsDirectory.path
     )
   }
 }

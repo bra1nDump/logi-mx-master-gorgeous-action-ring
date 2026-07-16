@@ -12,22 +12,27 @@ public enum ServiceCommand: String, Codable, CaseIterable, Equatable {
 
 public struct ServiceLifecyclePaths: Equatable {
   public static let label = "com.logiliquid.controls.daemon"
+  public static let overlayLabel = "com.logiliquid.controls.overlay"
 
   public let homeDirectory: URL
   public let sourceDaemonURL: URL
+  public let sourceOverlayURL: URL
   public let applicationSupportDirectory: URL
   public let binDirectory: URL
   public let installedDaemonURL: URL
+  public let installedOverlayURL: URL
   public let logsDirectory: URL
   public let configurationURL: URL
   public let socketURL: URL
   public let launchAgentsDirectory: URL
   public let launchAgentURL: URL
+  public let overlayLaunchAgentURL: URL
   public let launchctlURL: URL
   public let userID: uid_t
 
   public var launchdDomain: String { "gui/\(userID)" }
   public var launchdTarget: String { "\(launchdDomain)/\(Self.label)" }
+  public var overlayLaunchdTarget: String { "\(launchdDomain)/\(Self.overlayLabel)" }
 
   public init(
     homeDirectory: URL,
@@ -37,6 +42,10 @@ public struct ServiceLifecyclePaths: Equatable {
   ) {
     self.homeDirectory = homeDirectory
     self.sourceDaemonURL = sourceDaemonURL
+    sourceOverlayURL =
+      sourceDaemonURL
+      .deletingLastPathComponent()
+      .appending(path: "logi-liquid-overlay", directoryHint: .notDirectory)
     applicationSupportDirectory =
       homeDirectory
       .appending(
@@ -47,6 +56,9 @@ public struct ServiceLifecyclePaths: Equatable {
     installedDaemonURL =
       binDirectory
       .appending(path: "logi-liquid-daemon", directoryHint: .notDirectory)
+    installedOverlayURL =
+      binDirectory
+      .appending(path: "logi-liquid-overlay", directoryHint: .notDirectory)
     logsDirectory =
       applicationSupportDirectory
       .appending(path: "logs", directoryHint: .isDirectory)
@@ -62,6 +74,9 @@ public struct ServiceLifecyclePaths: Equatable {
     launchAgentURL =
       launchAgentsDirectory
       .appending(path: "\(Self.label).plist", directoryHint: .notDirectory)
+    overlayLaunchAgentURL =
+      launchAgentsDirectory
+      .appending(path: "\(Self.overlayLabel).plist", directoryHint: .notDirectory)
     self.launchctlURL = launchctlURL
     self.userID = userID
   }
@@ -80,43 +95,62 @@ public struct ServiceLifecyclePaths: Equatable {
 }
 
 public struct ServiceLifecycleResult: Codable, Equatable {
-  public static let currentSchemaVersion = 1
+  public static let currentSchemaVersion = 2
 
   public let schemaVersion: Int
   public let operation: ServiceCommand
   public let label: String
+  public let overlayLabel: String
   public let installed: Bool
   public let loaded: Bool
+  public let daemonLoaded: Bool
+  public let overlayLoaded: Bool
   public let daemonExecutablePath: String
+  public let overlayExecutablePath: String
   public let launchAgentPath: String
+  public let overlayLaunchAgentPath: String
   public let configurationPath: String
   public let socketPath: String
+  public let logsPath: String
 
   public init(
     schemaVersion: Int = ServiceLifecycleResult.currentSchemaVersion,
     operation: ServiceCommand,
     label: String = ServiceLifecyclePaths.label,
+    overlayLabel: String = ServiceLifecyclePaths.overlayLabel,
     installed: Bool,
     loaded: Bool,
+    daemonLoaded: Bool,
+    overlayLoaded: Bool,
     daemonExecutablePath: String,
+    overlayExecutablePath: String,
     launchAgentPath: String,
+    overlayLaunchAgentPath: String,
     configurationPath: String,
-    socketPath: String
+    socketPath: String,
+    logsPath: String
   ) {
     self.schemaVersion = schemaVersion
     self.operation = operation
     self.label = label
+    self.overlayLabel = overlayLabel
     self.installed = installed
     self.loaded = loaded
+    self.daemonLoaded = daemonLoaded
+    self.overlayLoaded = overlayLoaded
     self.daemonExecutablePath = daemonExecutablePath
+    self.overlayExecutablePath = overlayExecutablePath
     self.launchAgentPath = launchAgentPath
+    self.overlayLaunchAgentPath = overlayLaunchAgentPath
     self.configurationPath = configurationPath
     self.socketPath = socketPath
+    self.logsPath = logsPath
   }
 }
 
 public enum ServiceLifecycleError: Error, Equatable, LocalizedError {
   case daemonExecutableMissing(String)
+  case overlayExecutableMissing(String)
   case notInstalled(String)
   case fileSystem(operation: String, message: String)
   case process(operation: String, message: String)
@@ -125,6 +159,7 @@ public enum ServiceLifecycleError: Error, Equatable, LocalizedError {
   public var code: String {
     switch self {
     case .daemonExecutableMissing: "daemon_executable_missing"
+    case .overlayExecutableMissing: "overlay_executable_missing"
     case .notInstalled: "not_installed"
     case .fileSystem: "filesystem_failed"
     case .process: "process_failed"
@@ -136,6 +171,8 @@ public enum ServiceLifecycleError: Error, Equatable, LocalizedError {
     switch self {
     case .daemonExecutableMissing(let path):
       return "Sibling logi-liquid-daemon executable is missing or not executable at \(path)."
+    case .overlayExecutableMissing(let path):
+      return "Sibling logi-liquid-overlay executable is missing or not executable at \(path)."
     case .notInstalled(let path):
       return "Mouse service is not installed; expected \(path)."
     case .fileSystem(let operation, let message):
@@ -270,6 +307,16 @@ public final class FoundationServiceProcessRunner: ServiceProcessRunning {
 }
 
 public final class ServiceLifecycleController: ServiceLifecycleControlling {
+  /// One launchd job managed by the lifecycle. The daemon and overlay are
+  /// installed, started, and removed together; permissions stay tied only to
+  /// the daemon binary.
+  private struct ManagedAgent {
+    let sourceURL: URL
+    let installedURL: URL
+    let agentURL: URL
+    let launchdTarget: String
+  }
+
   private let paths: ServiceLifecyclePaths
   private let fileSystem: any ServiceFileSystem
   private let processRunner: any ServiceProcessRunning
@@ -284,39 +331,66 @@ public final class ServiceLifecycleController: ServiceLifecycleControlling {
     self.processRunner = processRunner
   }
 
+  private var daemonAgent: ManagedAgent {
+    ManagedAgent(
+      sourceURL: paths.sourceDaemonURL,
+      installedURL: paths.installedDaemonURL,
+      agentURL: paths.launchAgentURL,
+      launchdTarget: paths.launchdTarget
+    )
+  }
+
+  private var overlayAgent: ManagedAgent {
+    ManagedAgent(
+      sourceURL: paths.sourceOverlayURL,
+      installedURL: paths.installedOverlayURL,
+      agentURL: paths.overlayLaunchAgentURL,
+      launchdTarget: paths.overlayLaunchdTarget
+    )
+  }
+
+  private var agents: [ManagedAgent] { [daemonAgent, overlayAgent] }
+
   public func perform(_ command: ServiceCommand) throws -> ServiceLifecycleResult {
     do {
       switch command {
       case .install:
         return try install()
-      case .start:
+      case .start, .restart:
         try requireInstalled()
-        if try !isLoaded() {
-          try runLaunchctl(["bootstrap", paths.launchdDomain, paths.launchAgentURL.path])
+        for agent in agents {
+          if try !isLoaded(agent) {
+            try runLaunchctl(["bootstrap", paths.launchdDomain, agent.agentURL.path])
+          }
+          try runLaunchctl(["kickstart", "-k", agent.launchdTarget])
         }
-        try runLaunchctl(["kickstart", "-k", paths.launchdTarget])
-        return result(for: command, installed: true, loaded: true)
+        return result(for: command, installed: true, daemonLoaded: true, overlayLoaded: true)
       case .stop:
-        if try isLoaded() {
-          try runLaunchctl(["bootout", paths.launchdTarget])
+        for agent in agents {
+          if try isLoaded(agent) {
+            try runLaunchctl(["bootout", agent.launchdTarget])
+          }
         }
-        return result(for: command, installed: isInstalled, loaded: false)
-      case .restart:
-        try requireInstalled()
-        if try !isLoaded() {
-          try runLaunchctl(["bootstrap", paths.launchdDomain, paths.launchAgentURL.path])
-        }
-        try runLaunchctl(["kickstart", "-k", paths.launchdTarget])
-        return result(for: command, installed: true, loaded: true)
+        return result(
+          for: command, installed: isInstalled, daemonLoaded: false, overlayLoaded: false)
       case .status:
-        return try result(for: command, installed: isInstalled, loaded: isLoaded())
+        return try result(
+          for: command,
+          installed: isInstalled,
+          daemonLoaded: isLoaded(daemonAgent),
+          overlayLoaded: isLoaded(overlayAgent)
+        )
       case .uninstall:
-        if try isLoaded() {
-          try runLaunchctl(["bootout", paths.launchdTarget])
+        for agent in agents {
+          if try isLoaded(agent) {
+            try runLaunchctl(["bootout", agent.launchdTarget])
+          }
         }
-        try fileSystem.removeItemIfExists(at: paths.launchAgentURL)
-        try fileSystem.removeItemIfExists(at: paths.installedDaemonURL)
-        return result(for: command, installed: false, loaded: false)
+        for agent in agents {
+          try fileSystem.removeItemIfExists(at: agent.agentURL)
+          try fileSystem.removeItemIfExists(at: agent.installedURL)
+        }
+        return result(for: command, installed: false, daemonLoaded: false, overlayLoaded: false)
       }
     } catch let error as ServiceLifecycleError {
       throw error
@@ -353,14 +427,39 @@ public final class ServiceLifecycleController: ServiceLifecycleControlling {
     )
   }
 
+  public func overlayLaunchAgentPropertyList() throws -> Data {
+    let propertyList: [String: Any] = [
+      "Label": ServiceLifecyclePaths.overlayLabel,
+      "ProgramArguments": [
+        paths.installedOverlayURL.path
+      ],
+      "RunAtLoad": true,
+      "KeepAlive": true,
+      "ProcessType": "Interactive",
+      "LimitLoadToSessionType": "Aqua",
+      "WorkingDirectory": paths.applicationSupportDirectory.path,
+      "StandardOutPath": paths.logsDirectory.appending(path: "overlay.log").path,
+      "StandardErrorPath": paths.logsDirectory.appending(path: "overlay.error.log").path,
+    ]
+    return try PropertyListSerialization.data(
+      fromPropertyList: propertyList,
+      format: .xml,
+      options: 0
+    )
+  }
+
   private var isInstalled: Bool {
-    fileSystem.itemExists(at: paths.installedDaemonURL)
-      && fileSystem.itemExists(at: paths.launchAgentURL)
+    agents.allSatisfy {
+      fileSystem.itemExists(at: $0.installedURL) && fileSystem.itemExists(at: $0.agentURL)
+    }
   }
 
   private func install() throws -> ServiceLifecycleResult {
     guard fileSystem.isExecutableFile(at: paths.sourceDaemonURL) else {
       throw ServiceLifecycleError.daemonExecutableMissing(paths.sourceDaemonURL.path)
+    }
+    guard fileSystem.isExecutableFile(at: paths.sourceOverlayURL) else {
+      throw ServiceLifecycleError.overlayExecutableMissing(paths.sourceOverlayURL.path)
     }
 
     try fileSystem.ensureDirectory(at: paths.applicationSupportDirectory, permissions: 0o700)
@@ -371,18 +470,29 @@ public final class ServiceLifecycleController: ServiceLifecycleControlling {
       from: paths.sourceDaemonURL,
       to: paths.installedDaemonURL
     )
+    try fileSystem.copyExecutableAtomically(
+      from: paths.sourceOverlayURL,
+      to: paths.installedOverlayURL
+    )
     try fileSystem.writeAtomically(
       launchAgentPropertyList(),
       to: paths.launchAgentURL,
       permissions: 0o600
     )
+    try fileSystem.writeAtomically(
+      overlayLaunchAgentPropertyList(),
+      to: paths.overlayLaunchAgentURL,
+      permissions: 0o600
+    )
 
-    if try isLoaded() {
-      try runLaunchctl(["bootout", paths.launchdTarget])
+    for agent in agents {
+      if try isLoaded(agent) {
+        try runLaunchctl(["bootout", agent.launchdTarget])
+      }
+      try runLaunchctl(["bootstrap", paths.launchdDomain, agent.agentURL.path])
+      try runLaunchctl(["kickstart", "-k", agent.launchdTarget])
     }
-    try runLaunchctl(["bootstrap", paths.launchdDomain, paths.launchAgentURL.path])
-    try runLaunchctl(["kickstart", "-k", paths.launchdTarget])
-    return result(for: .install, installed: true, loaded: true)
+    return result(for: .install, installed: true, daemonLoaded: true, overlayLoaded: true)
   }
 
   private func requireInstalled() throws {
@@ -391,8 +501,8 @@ public final class ServiceLifecycleController: ServiceLifecycleControlling {
     }
   }
 
-  private func isLoaded() throws -> Bool {
-    let result = try runProcess(["print", paths.launchdTarget])
+  private func isLoaded(_ agent: ManagedAgent) throws -> Bool {
+    let result = try runProcess(["print", agent.launchdTarget])
     return result.terminationStatus == 0
   }
 
@@ -426,16 +536,22 @@ public final class ServiceLifecycleController: ServiceLifecycleControlling {
   private func result(
     for command: ServiceCommand,
     installed: Bool,
-    loaded: Bool
+    daemonLoaded: Bool,
+    overlayLoaded: Bool
   ) -> ServiceLifecycleResult {
     ServiceLifecycleResult(
       operation: command,
       installed: installed,
-      loaded: loaded,
+      loaded: daemonLoaded && overlayLoaded,
+      daemonLoaded: daemonLoaded,
+      overlayLoaded: overlayLoaded,
       daemonExecutablePath: paths.installedDaemonURL.path,
+      overlayExecutablePath: paths.installedOverlayURL.path,
       launchAgentPath: paths.launchAgentURL.path,
+      overlayLaunchAgentPath: paths.overlayLaunchAgentURL.path,
       configurationPath: paths.configurationURL.path,
-      socketPath: paths.socketURL.path
+      socketPath: paths.socketURL.path,
+      logsPath: paths.logsDirectory.path
     )
   }
 }

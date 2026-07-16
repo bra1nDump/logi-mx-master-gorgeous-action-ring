@@ -30,12 +30,6 @@ main {
   text-align: center;
 }
 
-.mark {
-  width: 112px;
-  height: 112px;
-  margin-bottom: 24px;
-}
-
 .eyebrow {
   margin: 0 0 8px;
   color: var(--accent);
@@ -102,9 +96,10 @@ a {
   margin: 0 0 88px;
 }
 
-.demo img {
+.demo video {
   display: block;
   width: 100%;
+  border-radius: 18px;
   filter: drop-shadow(0 24px 40px rgba(35, 24, 54, 0.16));
 }
 

@@ -228,10 +228,11 @@ public enum JimError: LocalizedError, Equatable {
   case invalidFrameRate(Int)
   case invalidDuration(Double)
   case invalidDemoScenario
-  case gifDestinationCreationFailed
-  case gifEncodingFailed
-  case invalidGIF
-  case opaqueGIFBackground
+  case videoWriterCreationFailed(String)
+  case videoEncodingFailed(String)
+  case invalidVideo
+  case demoBackgroundMissing
+  case pixelBufferCreationFailed
   case usage(String)
 
   public var errorDescription: String? {
@@ -265,14 +266,16 @@ public enum JimError: LocalizedError, Equatable {
       "Invalid demo duration \(duration); expected 2...8 seconds."
     case .invalidDemoScenario:
       "The CommandBloom demo scenario could not resolve its top target or latch frame."
-    case .gifDestinationCreationFailed:
-      "Could not create the GIF destination."
-    case .gifEncodingFailed:
-      "Could not finalize the GIF."
-    case .invalidGIF:
-      "The generated GIF failed structural validation."
-    case .opaqueGIFBackground:
-      "The generated GIF does not have a transparent background."
+    case .videoWriterCreationFailed(let reason):
+      "Could not create the demo video writer: \(reason)."
+    case .videoEncodingFailed(let reason):
+      "Could not encode the demo video: \(reason)."
+    case .invalidVideo:
+      "The generated demo video failed structural validation."
+    case .demoBackgroundMissing:
+      "The demo wallpaper does not cover every frame corner."
+    case .pixelBufferCreationFailed:
+      "Could not allocate a video pixel buffer."
     case .usage(let message):
       message
     }

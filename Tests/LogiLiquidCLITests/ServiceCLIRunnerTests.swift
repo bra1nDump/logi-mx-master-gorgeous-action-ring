@@ -13,12 +13,19 @@ final class ServiceCLIRunnerTests: XCTestCase {
         operation: command,
         installed: true,
         loaded: false,
+        daemonLoaded: true,
+        overlayLoaded: false,
         daemonExecutablePath:
           "/Users/tester/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-daemon",
+        overlayExecutablePath:
+          "/Users/tester/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-overlay",
         launchAgentPath: "/Users/tester/Library/LaunchAgents/com.logiliquid.controls.daemon.plist",
+        overlayLaunchAgentPath:
+          "/Users/tester/Library/LaunchAgents/com.logiliquid.controls.overlay.plist",
         configurationPath:
           "/Users/tester/Library/Application Support/Logi Liquid Controls/config.json",
-        socketPath: "/Users/tester/.logi-liquid-controls/run/mouse-control.sock"
+        socketPath: "/Users/tester/.logi-liquid-controls/run/mouse-control.sock",
+        logsPath: "/Users/tester/Library/Application Support/Logi Liquid Controls/logs"
       )
     }
     var transportConstructed = false
@@ -35,7 +42,7 @@ final class ServiceCLIRunnerTests: XCTestCase {
     XCTAssertFalse(transportConstructed)
     XCTAssertEqual(
       recorder.standardOutput,
-      #"{"configurationPath":"/Users/tester/Library/Application Support/Logi Liquid Controls/config.json","daemonExecutablePath":"/Users/tester/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-daemon","installed":true,"label":"com.logiliquid.controls.daemon","launchAgentPath":"/Users/tester/Library/LaunchAgents/com.logiliquid.controls.daemon.plist","loaded":false,"operation":"status","schemaVersion":1,"socketPath":"/Users/tester/.logi-liquid-controls/run/mouse-control.sock"}"#
+      #"{"configurationPath":"/Users/tester/Library/Application Support/Logi Liquid Controls/config.json","daemonExecutablePath":"/Users/tester/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-daemon","daemonLoaded":true,"installed":true,"label":"com.logiliquid.controls.daemon","launchAgentPath":"/Users/tester/Library/LaunchAgents/com.logiliquid.controls.daemon.plist","loaded":false,"logsPath":"/Users/tester/Library/Application Support/Logi Liquid Controls/logs","operation":"status","overlayExecutablePath":"/Users/tester/Library/Application Support/Logi Liquid Controls/bin/logi-liquid-overlay","overlayLabel":"com.logiliquid.controls.overlay","overlayLaunchAgentPath":"/Users/tester/Library/LaunchAgents/com.logiliquid.controls.overlay.plist","overlayLoaded":false,"schemaVersion":2,"socketPath":"/Users/tester/.logi-liquid-controls/run/mouse-control.sock"}"#
         + "\n"
     )
     XCTAssertEqual(recorder.standardError, "")

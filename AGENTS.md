@@ -20,10 +20,17 @@
   .build/release/logi-liquid service install
   ```
 
+- `service install` manages two LaunchAgents: the daemon and the overlay. Both
+  log to `~/Library/Application Support/Logi Liquid Controls/logs/`. "Cursor
+  hides but no ring" means the overlay agent is down — check
+  `service status` (`overlayLoaded`) and `overlay.error.log`.
+
 - Verify the installed signature, service, permissions, and device with
   `codesign -dv --verbose=4 ~/Library/Application\ Support/Logi\ Liquid\ Controls/bin/logi-liquid-daemon`,
   `logi-liquid service status`, and `logi-liquid doctor`.
 - Re-record and verify Jim after visual or interaction-state changes:
   `jim record --directory jim/Snapshots` then `jim verify --directory jim/Snapshots`.
+  Regenerate the public demo with
+  `jim demo --output docs/assets/command-bloom-demo.mp4 --poster docs/assets/command-bloom-demo-poster.png`.
 - SwiftPM resources such as the bundled OpenAI mark must ship beside the overlay;
   never read another installed app's private assets at runtime.

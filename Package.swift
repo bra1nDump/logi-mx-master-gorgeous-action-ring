@@ -89,6 +89,9 @@ let package = Package(
       dependencies: ["LogiLiquidCore", "LogiLiquidUI"],
       linkerSettings: [
         .linkedFramework("AppKit"),
+        .linkedFramework("AVFoundation"),
+        .linkedFramework("CoreMedia"),
+        .linkedFramework("CoreVideo"),
         .linkedFramework("ImageIO"),
         .linkedFramework("ScreenCaptureKit"),
       ]

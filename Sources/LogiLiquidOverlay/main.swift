@@ -1,4 +1,5 @@
 import AppKit
+import LogiLiquidControl
 
 /// `logi-liquid-overlay` is the native Liquid Glass overlay for the standalone
 /// mouse ring. It is transport and window glue only: it subscribes to the
@@ -10,6 +11,10 @@ final class OverlayAppDelegate: NSObject, NSApplicationDelegate {
   private var controller: OverlayController?
 
   func applicationDidFinishLaunching(_ notification: Notification) {
+    OverlayLog.log(
+      "starting (pid \(ProcessInfo.processInfo.processIdentifier)), daemon socket: "
+        + LogiLiquidControlProtocol.defaultSocketURL.path
+    )
     let controller = OverlayController()
     self.controller = controller
     controller.start()

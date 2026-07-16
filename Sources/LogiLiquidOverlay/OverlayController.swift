@@ -73,10 +73,15 @@ final class OverlayController {
     guard let placement else {
       // No display resolved (no screens): keep the panel hidden rather than
       // presenting an unplaced window.
+      OverlayLog.log(
+        "no display resolved for ring origin (\(model.cgOrigin.x), \(model.cgOrigin.y)); "
+          + "keeping the overlay hidden"
+      )
       store.update(isVisible: false, model: model, localOrigin: store.localOrigin)
       return
     }
 
+    OverlayLog.log("presenting ring at (\(model.cgOrigin.x), \(model.cgOrigin.y))")
     store.update(isVisible: true, model: model, localOrigin: placement.localOrigin)
     panel?.present(displayFrame: placement.display.appKitFrame)
   }
@@ -107,7 +112,11 @@ final class OverlayController {
   private func send(_ method: ControlMethod) {
     let client = self.client
     commandQueue.async {
-      _ = try? client.request(method: method)
+      do {
+        _ = try client.request(method: method)
+      } catch {
+        OverlayLog.log("failed to send \(method.rawValue) to the daemon: \(error)")
+      }
     }
   }
 }

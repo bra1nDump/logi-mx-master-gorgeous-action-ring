@@ -13,7 +13,7 @@ final class JimRendererTests: XCTestCase {
     scale: 1
   )
 
-  func testDemoTimelineCoversInvocationMovementSuctionCommitAndDismiss() throws {
+  func testDemoTimelineCoversDesktopBuzzInvocationMovementSuctionCommitAndDismiss() throws {
     let configuration = JimDemoConfiguration(
       pixelWidth: 900,
       pixelHeight: 600,
@@ -22,11 +22,36 @@ final class JimRendererTests: XCTestCase {
     let timeline = try JimDemoTimeline(configuration: configuration)
     let frames = (0..<configuration.frameCount).map(timeline.frame(at:))
 
-    XCTAssertEqual(configuration.frameCount, 96)
+    XCTAssertEqual(configuration.frameCount, 84)
     XCTAssertEqual(Set(frames.map(\.phase)), Set(JimDemoPhase.allCases))
-    XCTAssertEqual(frames.first?.overallOpacity, 0)
-    XCTAssertEqual(frames.last?.phase, .hidden)
-    XCTAssertEqual(frames.last?.overallOpacity, 0)
+
+    // The video opens and closes on a plain desktop with the pointer visible,
+    // so it loops cleanly.
+    let first = try XCTUnwrap(frames.first)
+    XCTAssertEqual(first.phase, .desktop)
+    XCTAssertTrue(first.cursorVisible)
+    XCTAssertEqual(first.overallOpacity, 0)
+    let last = try XCTUnwrap(frames.last)
+    XCTAssertEqual(last.phase, .desktop)
+    XCTAssertTrue(last.cursorVisible)
+    XCTAssertEqual(last.overallOpacity, 0)
+
+    // The buzz shakes the still-visible pointer before the ring exists.
+    let buzzFrames = frames.filter { $0.phase == .buzz }
+    XCTAssertFalse(buzzFrames.isEmpty)
+    XCTAssertTrue(buzzFrames.allSatisfy(\.cursorVisible))
+    XCTAssertTrue(buzzFrames.allSatisfy { $0.overallOpacity == 0 })
+    XCTAssertTrue(buzzFrames.contains { $0.cursorShakeOffset != .zero })
+    XCTAssertTrue(buzzFrames.contains { $0.buzzProgress > 0.5 })
+
+    // The pointer hides while the ring is active and returns for dismissal,
+    // matching the product's cursor hide/restore.
+    let ringFrames = frames.filter {
+      [.invocation, .travel, .suction, .committed].contains($0.phase)
+    }
+    XCTAssertTrue(ringFrames.allSatisfy { !$0.cursorVisible })
+    let dismissing = try XCTUnwrap(frames.first { $0.phase == .dismissing })
+    XCTAssertTrue(dismissing.cursorVisible)
 
     let travel = try XCTUnwrap(frames.last { $0.phase == .travel })
     let suction = try XCTUnwrap(frames.last { $0.phase == .suction })
@@ -51,19 +76,10 @@ final class JimRendererTests: XCTestCase {
       RingInteractionThresholds.latchOverlapFraction,
       accuracy: 0.000_001
     )
-
-    let encodedDuration = (0..<configuration.frameCount).reduce(0.0) {
-      $0 + configuration.encodedFrameDelay(at: $1)
-    }
-    XCTAssertEqual(encodedDuration, configuration.duration, accuracy: 0.000_001)
-    let firstDelays = (0..<3).map(configuration.encodedFrameDelay(at:))
-    XCTAssertEqual(firstDelays[0], 0.03, accuracy: 0.000_001)
-    XCTAssertEqual(firstDelays[1], 0.03, accuracy: 0.000_001)
-    XCTAssertEqual(firstDelays[2], 0.04, accuracy: 0.000_001)
   }
 
   @MainActor
-  func testCLIDemoWritesLoopingTransparentGIFAtExactDimensions() async throws {
+  func testCLIDemoWritesH264VideoAndPosterAtExactDimensions() async throws {
     let directory = FileManager.default.temporaryDirectory.appending(
       path: "jim-demo-tests-\(UUID().uuidString)",
       directoryHint: .isDirectory
@@ -73,7 +89,8 @@ final class JimRendererTests: XCTestCase {
     var standardError = Data()
     let exitCode = await JimCLI(currentDirectory: directory).run(
       arguments: [
-        "demo", "--output", "demo.gif", "--width", "320", "--height", "320", "--fps", "15",
+        "demo", "--output", "demo.mp4", "--poster", "poster.png",
+        "--width", "320", "--height", "320", "--fps", "15",
       ],
       standardOutput: { standardOutput.append($0) },
       standardError: { standardError.append($0) }
@@ -84,27 +101,32 @@ final class JimRendererTests: XCTestCase {
     let output = try JSONDecoder().decode(JimCLIOutput.self, from: standardOutput)
     XCTAssertEqual(output.command, "demo")
     XCTAssertTrue(output.ok)
+    XCTAssertEqual(
+      output.files,
+      [
+        directory.appending(path: "demo.mp4").path,
+        directory.appending(path: "poster.png").path,
+      ]
+    )
 
-    let gifURL = directory.appending(path: "demo.gif")
-    let artifact = try JimDemoRenderer.inspect(gifURL)
+    let videoURL = directory.appending(path: "demo.mp4")
+    let artifact = try await JimDemoRenderer.inspect(videoURL)
     XCTAssertEqual(artifact.pixelWidth, 320)
     XCTAssertEqual(artifact.pixelHeight, 320)
-    XCTAssertEqual(artifact.frameCount, 48)
-    XCTAssertEqual(artifact.loopCount, 0)
-    XCTAssertEqual(artifact.frameDelay, 1.0 / 15.0, accuracy: 0.001)
-    XCTAssertTrue(artifact.hasTransparentBackground)
+    XCTAssertEqual(artifact.frameCount, 42)
+    XCTAssertEqual(artifact.duration, 2.8, accuracy: 0.05)
+    XCTAssertTrue(artifact.isH264)
+    XCTAssertTrue(artifact.hasOpaqueBackground)
     XCTAssertGreaterThan(artifact.byteCount, 10_000)
-    XCTAssertLessThan(artifact.byteCount, 2_000_000)
+    XCTAssertLessThan(artifact.byteCount, 5_000_000)
 
-    let source = try XCTUnwrap(CGImageSourceCreateWithURL(gifURL as CFURL, nil))
-    let visibleFrame = try XCTUnwrap(CGImageSourceCreateImageAtIndex(source, 10, nil))
-    let bitmap = NSBitmapImageRep(cgImage: visibleFrame)
-    XCTAssertLessThan(try XCTUnwrap(bitmap.colorAt(x: 0, y: 0)).alphaComponent, 0.01)
-    XCTAssertGreaterThan(
-      try XCTUnwrap(bitmap.colorAt(x: 160, y: 160)).alphaComponent,
-      0.9,
-      "a visible invocation frame must contain the moving bubble"
+    let posterData = try Data(
+      contentsOf: directory.appending(path: "poster.png")
     )
+    let poster = try XCTUnwrap(NSBitmapImageRep(data: posterData))
+    XCTAssertEqual(poster.pixelsWide, 320)
+    XCTAssertEqual(poster.pixelsHigh, 320)
+    try assertBackdropCoversEntireFrame(posterData)
   }
 
   func testRepresentativeScenariosComeFromRealCoreTransitions() throws {
