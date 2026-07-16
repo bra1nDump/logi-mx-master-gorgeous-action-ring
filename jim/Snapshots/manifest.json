@@ -1,0 +1,38 @@
+{
+  "configuration" : {
+    "logicalHeight" : 520,
+    "logicalWidth" : 720,
+    "scale" : 2
+  },
+  "schemaVersion" : 1,
+  "snapshots" : [
+    {
+      "byteCount" : 1620546,
+      "file" : "invoked.png",
+      "pixelHeight" : 1040,
+      "pixelWidth" : 1440,
+      "state" : "invoked"
+    },
+    {
+      "byteCount" : 1627216,
+      "file" : "targeting.png",
+      "pixelHeight" : 1040,
+      "pixelWidth" : 1440,
+      "state" : "targeting"
+    },
+    {
+      "byteCount" : 1626083,
+      "file" : "latched-suction-threshold.png",
+      "pixelHeight" : 1040,
+      "pixelWidth" : 1440,
+      "state" : "latched-suction-threshold"
+    },
+    {
+      "byteCount" : 1626083,
+      "file" : "committed.png",
+      "pixelHeight" : 1040,
+      "pixelWidth" : 1440,
+      "state" : "committed"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "description": "Synthetic HID++ 2.0 long reports for offline parser and CLI replay tests. No serial number or captured user data.",
+  "featureIndex": 30,
+  "reports": [
+    {
+      "name": "sense-panel-down",
+      "hex": "11 FF 1E 00 01 A0 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+    },
+    {
+      "name": "raw-xy-left-down",
+      "hex": "11 FF 1E 10 FF FB 00 0C 00 00 00 00 00 00 00 00 00 00 00 00"
+    },
+    {
+      "name": "all-diverted-controls-released",
+      "hex": "11 FF 1E 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00"
+    }
+  ]
+}
