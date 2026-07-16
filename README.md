@@ -16,8 +16,6 @@ inserts on its own line here.
 
 https://github.com/user-attachments/assets/f5f9d8a9-18c9-4357-9433-fe4240b5a7b8
 
-[![CommandBloom demo](docs/assets/command-bloom-demo-poster.png)](https://bra1ndump.github.io/command-bloom/)
-
 CommandBloom turns the MX Master 4's Sense Panel into a radial launcher for
 apps, shortcuts, URLs, and commands. It runs entirely on your Mac, talks
 directly to the mouse, and has no settings UI — a coding agent configures it
