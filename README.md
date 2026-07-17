@@ -9,7 +9,7 @@ demo is regenerated, re-upload it through the README web editor and replace
 this URL.
 -->
 
-https://github.com/user-attachments/assets/f5f9d8a9-18c9-4357-9433-fe4240b5a7b8
+https://github.com/user-attachments/assets/e655590b-d9de-4f1d-a963-d3a8c84387fb
 
 ## Install
 
