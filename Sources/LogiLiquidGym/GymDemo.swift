@@ -9,12 +9,12 @@ import ScreenCaptureKit
 import SwiftUI
 
 /// Deterministic output settings for the CommandBloom demo video.
-public struct JimDemoConfiguration: Codable, Equatable, Sendable {
-  public static let `default` = JimDemoConfiguration(
+public struct GymDemoConfiguration: Codable, Equatable, Sendable {
+  public static let `default` = GymDemoConfiguration(
     pixelWidth: 1_280,
     pixelHeight: 800,
     framesPerSecond: 60,
-    duration: JimDemoTimeline.Timing.total
+    duration: GymDemoTimeline.Timing.total
   )
 
   public let pixelWidth: Int
@@ -26,7 +26,7 @@ public struct JimDemoConfiguration: Codable, Equatable, Sendable {
     pixelWidth: Int,
     pixelHeight: Int,
     framesPerSecond: Int,
-    duration: Double = JimDemoTimeline.Timing.total
+    duration: Double = GymDemoTimeline.Timing.total
   ) {
     self.pixelWidth = pixelWidth
     self.pixelHeight = pixelHeight
@@ -44,29 +44,29 @@ public struct JimDemoConfiguration: Codable, Equatable, Sendable {
 
   public func validate() throws {
     guard (320...1_920).contains(pixelWidth) else {
-      throw JimError.invalidDimension(name: "demo width", value: pixelWidth)
+      throw GymError.invalidDimension(name: "demo width", value: pixelWidth)
     }
     guard (320...1_200).contains(pixelHeight) else {
-      throw JimError.invalidDimension(name: "demo height", value: pixelHeight)
+      throw GymError.invalidDimension(name: "demo height", value: pixelHeight)
     }
     guard (12...60).contains(framesPerSecond) else {
-      throw JimError.invalidFrameRate(framesPerSecond)
+      throw GymError.invalidFrameRate(framesPerSecond)
     }
     guard duration.isFinite, (2...8).contains(duration) else {
-      throw JimError.invalidDuration(duration)
+      throw GymError.invalidDuration(duration)
     }
   }
 }
 
 @MainActor
-private final class JimDemoWindowHost {
-  private let timeline: JimDemoTimeline
+private final class GymDemoWindowHost {
+  private let timeline: GymDemoTimeline
   private let window: NSWindow
-  private let hostingView: NSHostingView<JimDemoScene>
+  private let hostingView: NSHostingView<GymDemoScene>
   private let shareableWindow: SCWindow
   private let captureConfiguration: SCStreamConfiguration
 
-  init(timeline: JimDemoTimeline) async throws {
+  init(timeline: GymDemoTimeline) async throws {
     self.timeline = timeline
     let configuration = timeline.configuration
     let application = NSApplication.shared
@@ -74,7 +74,7 @@ private final class JimDemoWindowHost {
     application.appearance = NSAppearance(named: .darkAqua)
     application.finishLaunching()
 
-    let firstScene = JimDemoScene(
+    let firstScene = GymDemoScene(
       frame: timeline.frame(at: 0),
       timeline: timeline
     )
@@ -102,7 +102,7 @@ private final class JimDemoWindowHost {
     window.appearance = NSAppearance(named: .darkAqua)
     window.collectionBehavior = [.stationary]
     window.level = .floating
-    let windowTitle = "Jim CommandBloom Demo \(UUID().uuidString)"
+    let windowTitle = "Gym CommandBloom Demo \(UUID().uuidString)"
     window.title = windowTitle
     if let screen = NSScreen.screens.max(by: {
       $0.visibleFrame.width * $0.visibleFrame.height
@@ -138,7 +138,7 @@ private final class JimDemoWindowHost {
     guard let resolvedWindow else {
       window.orderOut(nil)
       window.close()
-      throw JimError.hostedWindowUnavailable(window.windowNumber)
+      throw GymError.hostedWindowUnavailable(window.windowNumber)
     }
     shareableWindow = resolvedWindow
 
@@ -151,8 +151,8 @@ private final class JimDemoWindowHost {
     try await Task.sleep(for: .milliseconds(100))
   }
 
-  func capture(_ frame: JimDemoFrame) async throws -> CGImage {
-    hostingView.rootView = JimDemoScene(frame: frame, timeline: timeline)
+  func capture(_ frame: GymDemoFrame) async throws -> CGImage {
+    hostingView.rootView = GymDemoScene(frame: frame, timeline: timeline)
     hostingView.layoutSubtreeIfNeeded()
     hostingView.needsDisplay = true
     hostingView.displayIfNeeded()
@@ -176,9 +176,9 @@ private final class JimDemoWindowHost {
 
 /// The composed demo frame: a macOS-style wallpaper, the standard pointer, the
 /// Sense Panel buzz, and the production `OverlayView` on top.
-private struct JimDemoScene: View {
-  let frame: JimDemoFrame
-  let timeline: JimDemoTimeline
+private struct GymDemoScene: View {
+  let frame: GymDemoFrame
+  let timeline: GymDemoTimeline
 
   var body: some View {
     let configuration = timeline.configuration
@@ -188,7 +188,7 @@ private struct JimDemoScene: View {
     )
     let center = CGPoint(x: size.width / 2, y: size.height / 2)
     ZStack {
-      JimDemoWallpaper()
+      GymDemoWallpaper()
       ZStack {
         OverlayView(
           model: model,
@@ -305,7 +305,7 @@ private struct JimDemoScene: View {
 /// A deterministic macOS-style wallpaper: large soft color fields over a deep
 /// blue base, so the glass ring reads exactly as it does on a real desktop
 /// without ever capturing the user's actual screen.
-private struct JimDemoWallpaper: View {
+private struct GymDemoWallpaper: View {
   var body: some View {
     GeometryReader { proxy in
       let size = proxy.size
@@ -347,7 +347,7 @@ private struct JimDemoWallpaper: View {
   }
 }
 
-public enum JimDemoPhase: String, CaseIterable, Sendable {
+public enum GymDemoPhase: String, CaseIterable, Sendable {
   case desktop
   case buzz
   case invocation
@@ -359,9 +359,9 @@ public enum JimDemoPhase: String, CaseIterable, Sendable {
 
 /// One deterministic visual frame. Geometry remains in the production
 /// overlay's logical point space and is scaled only by the native renderer.
-public struct JimDemoFrame: Equatable, Sendable {
+public struct GymDemoFrame: Equatable, Sendable {
   public let index: Int
-  public let phase: JimDemoPhase
+  public let phase: GymDemoPhase
   public let presentationProgress: Double
   public let overallOpacity: Double
   public let bubbleOffset: CGPoint
@@ -374,7 +374,7 @@ public struct JimDemoFrame: Equatable, Sendable {
 
   public init(
     index: Int,
-    phase: JimDemoPhase,
+    phase: GymDemoPhase,
     presentationProgress: Double,
     overallOpacity: Double,
     bubbleOffset: CGPoint,
@@ -399,12 +399,12 @@ public struct JimDemoFrame: Equatable, Sendable {
   }
 }
 
-/// A clock-free animation authored from the real Core/Jim scenarios. It opens
+/// A clock-free animation authored from the real Core/Gym scenarios. It opens
 /// on a desktop with the standard pointer, buzzes for the Sense Panel press,
 /// blooms the ring, travels to Core's configured overlap boundary, performs the
 /// 160 ms suction, commits, and dismisses back to the desktop so the video
 /// loops cleanly.
-public struct JimDemoTimeline: Sendable {
+public struct GymDemoTimeline: Sendable {
   public enum Timing {
     public static let cursorIntroEnd = 0.32
     public static let buzzEnd = 0.72
@@ -417,22 +417,22 @@ public struct JimDemoTimeline: Sendable {
     public static let total = 2.8
   }
 
-  public let configuration: JimDemoConfiguration
+  public let configuration: GymDemoConfiguration
   public let targets: [OverlayTargetModel]
   public let selectedTargetID: String
   public let selectedTargetOffset: CGPoint
   public let latchThresholdOffset: CGPoint
 
-  public init(configuration: JimDemoConfiguration = .default) throws {
+  public init(configuration: GymDemoConfiguration = .default) throws {
     try configuration.validate()
     let logicalSize = CGSize(width: configuration.pixelWidth, height: configuration.pixelHeight)
-    let invoked = try JimScenario.make(.invoked, logicalSize: logicalSize)
-    let latched = try JimScenario.make(.latchedSuctionThreshold, logicalSize: logicalSize)
+    let invoked = try GymScenario.make(.invoked, logicalSize: logicalSize)
+    let latched = try GymScenario.make(.latchedSuctionThreshold, logicalSize: logicalSize)
     guard
       let selected = invoked.model.targets.first(where: { $0.zone == .top }),
       latched.transition.frame.phase == .latched
     else {
-      throw JimError.invalidDemoScenario
+      throw GymError.invalidDemoScenario
     }
 
     self.configuration = configuration
@@ -445,7 +445,7 @@ public struct JimDemoTimeline: Sendable {
     )
   }
 
-  public func frame(at index: Int) -> JimDemoFrame {
+  public func frame(at index: Int) -> GymDemoFrame {
     let clampedIndex = min(max(index, 0), configuration.frameCount - 1)
     let time = Double(clampedIndex) / Double(configuration.framesPerSecond)
 
@@ -461,7 +461,7 @@ public struct JimDemoTimeline: Sendable {
         x: 3.4 * sin(progress * .pi * 9) * decay,
         y: 1.2 * sin(progress * .pi * 13) * decay
       )
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .buzz,
         presentationProgress: 0,
@@ -479,7 +479,7 @@ public struct JimDemoTimeline: Sendable {
       let progress = Self.smoothstep(
         (time - Timing.buzzEnd) / (Timing.invocationEnd - Timing.buzzEnd)
       )
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .invocation,
         presentationProgress: progress,
@@ -492,7 +492,7 @@ public struct JimDemoTimeline: Sendable {
     }
 
     if time < Timing.travelStart {
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .invocation,
         presentationProgress: 1,
@@ -515,7 +515,7 @@ public struct JimDemoTimeline: Sendable {
         x: Self.interpolate(0, latchThresholdOffset.x, progress) + lateralArc,
         y: Self.interpolate(0, latchThresholdOffset.y, progress)
       )
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .travel,
         presentationProgress: 1,
@@ -532,7 +532,7 @@ public struct JimDemoTimeline: Sendable {
         (time - Timing.travelEnd) / (Timing.suctionEnd - Timing.travelEnd)
       )
       let thresholdMerge = mergeProgress(at: latchThresholdOffset)
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .suction,
         presentationProgress: 1,
@@ -546,7 +546,7 @@ public struct JimDemoTimeline: Sendable {
 
     if time < Timing.dismissStart {
       let progress = (time - Timing.suctionEnd) / (Timing.dismissStart - Timing.suctionEnd)
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .committed,
         presentationProgress: 1,
@@ -563,7 +563,7 @@ public struct JimDemoTimeline: Sendable {
       let progress = Self.smootherstep(
         (time - Timing.dismissStart) / (Timing.dismissEnd - Timing.dismissStart)
       )
-      return JimDemoFrame(
+      return GymDemoFrame(
         index: clampedIndex,
         phase: .dismissing,
         presentationProgress: 1 - (0.12 * progress),
@@ -579,8 +579,8 @@ public struct JimDemoTimeline: Sendable {
     return desktopFrame(index: clampedIndex)
   }
 
-  private func desktopFrame(index: Int) -> JimDemoFrame {
-    JimDemoFrame(
+  private func desktopFrame(index: Int) -> GymDemoFrame {
+    GymDemoFrame(
       index: index,
       phase: .desktop,
       presentationProgress: 0,
@@ -626,7 +626,7 @@ public struct JimDemoTimeline: Sendable {
   }
 }
 
-public struct JimDemoArtifact: Codable, Equatable, Sendable {
+public struct GymDemoArtifact: Codable, Equatable, Sendable {
   public let url: URL
   public let pixelWidth: Int
   public let pixelHeight: Int
@@ -637,19 +637,19 @@ public struct JimDemoArtifact: Codable, Equatable, Sendable {
   public let hasOpaqueBackground: Bool
 }
 
-/// Native Jim renderer for the production `OverlayView`. It captures only its
+/// Native Gym renderer for the production `OverlayView`. It captures only its
 /// dedicated AppKit window; desktop windows are never in scope. The output is
 /// a high-quality H.264 MP4 suitable for GitHub and the project site.
 @MainActor
-public final class JimDemoRenderer {
+public final class GymDemoRenderer {
   public init() {}
 
   public func render(
     to output: URL,
     poster posterURL: URL? = nil,
-    configuration: JimDemoConfiguration = .default
-  ) async throws -> JimDemoArtifact {
-    let timeline = try JimDemoTimeline(configuration: configuration)
+    configuration: GymDemoConfiguration = .default
+  ) async throws -> GymDemoArtifact {
+    let timeline = try GymDemoTimeline(configuration: configuration)
     try FileManager.default.createDirectory(
       at: output.deletingLastPathComponent(),
       withIntermediateDirectories: true
@@ -660,7 +660,7 @@ public final class JimDemoRenderer {
     do {
       writer = try AVAssetWriter(outputURL: output, fileType: .mp4)
     } catch {
-      throw JimError.videoWriterCreationFailed(String(describing: error))
+      throw GymError.videoWriterCreationFailed(String(describing: error))
     }
     let input = AVAssetWriterInput(
       mediaType: .video,
@@ -687,19 +687,19 @@ public final class JimDemoRenderer {
     )
     writer.add(input)
     guard writer.startWriting() else {
-      throw JimError.videoEncodingFailed(String(describing: writer.error))
+      throw GymError.videoEncodingFailed(String(describing: writer.error))
     }
     writer.startSession(atSourceTime: .zero)
 
     // The poster is the mid-suction moment: the bubble fusing into the
     // selected target tells the whole story in one still.
-    let posterTime = (JimDemoTimeline.Timing.travelEnd + JimDemoTimeline.Timing.suctionEnd) / 2
+    let posterTime = (GymDemoTimeline.Timing.travelEnd + GymDemoTimeline.Timing.suctionEnd) / 2
     let posterIndex = min(
       configuration.frameCount - 1,
       Int((posterTime * Double(configuration.framesPerSecond)).rounded())
     )
 
-    let host = try await JimDemoWindowHost(timeline: timeline)
+    let host = try await GymDemoWindowHost(timeline: timeline)
     defer { host.close() }
     for index in 0..<configuration.frameCount {
       let image = try await host.capture(timeline.frame(at: index))
@@ -724,13 +724,13 @@ public final class JimDemoRenderer {
           )
         )
       else {
-        throw JimError.videoEncodingFailed(String(describing: writer.error))
+        throw GymError.videoEncodingFailed(String(describing: writer.error))
       }
     }
     input.markAsFinished()
     await writer.finishWriting()
     guard writer.status == .completed else {
-      throw JimError.videoEncodingFailed(String(describing: writer.error))
+      throw GymError.videoEncodingFailed(String(describing: writer.error))
     }
 
     let artifact = try await Self.inspect(output)
@@ -740,18 +740,18 @@ public final class JimDemoRenderer {
       abs(artifact.duration - configuration.duration) < 0.05,
       artifact.isH264
     else {
-      throw JimError.invalidVideo
+      throw GymError.invalidVideo
     }
     guard artifact.hasOpaqueBackground else {
-      throw JimError.demoBackgroundMissing
+      throw GymError.demoBackgroundMissing
     }
     return artifact
   }
 
-  public static func inspect(_ url: URL) async throws -> JimDemoArtifact {
+  public static func inspect(_ url: URL) async throws -> GymDemoArtifact {
     let asset = AVURLAsset(url: url)
     guard let track = try await asset.loadTracks(withMediaType: .video).first else {
-      throw JimError.invalidVideo
+      throw GymError.invalidVideo
     }
     let (naturalSize, formatDescriptions) = try await track.load(.naturalSize, .formatDescriptions)
     let duration = try await asset.load(.duration).seconds
@@ -766,7 +766,7 @@ public final class JimDemoRenderer {
     )
     reader.add(readerOutput)
     guard reader.startReading() else {
-      throw JimError.invalidVideo
+      throw GymError.invalidVideo
     }
     var frameCount = 0
     var middleFrame: CVPixelBuffer?
@@ -780,11 +780,11 @@ public final class JimDemoRenderer {
       }
     }
     guard reader.status == .completed, let middleFrame else {
-      throw JimError.invalidVideo
+      throw GymError.invalidVideo
     }
 
     let byteCount = try Data(contentsOf: url, options: [.mappedIfSafe]).count
-    return JimDemoArtifact(
+    return GymDemoArtifact(
       url: url,
       pixelWidth: Int(naturalSize.width.rounded()),
       pixelHeight: Int(naturalSize.height.rounded()),
@@ -827,7 +827,7 @@ public final class JimDemoRenderer {
     )
     let bitmap = NSBitmapImageRep(cgImage: image)
     guard let data = bitmap.representation(using: .png, properties: [:]) else {
-      throw JimError.pngEncodingFailed
+      throw GymError.pngEncodingFailed
     }
     try data.write(to: url, options: .atomic)
   }
@@ -856,7 +856,7 @@ public final class JimDemoRenderer {
       )
     }
     guard let buffer else {
-      throw JimError.pixelBufferCreationFailed
+      throw GymError.pixelBufferCreationFailed
     }
 
     CVPixelBufferLockBaseAddress(buffer, [])
@@ -873,7 +873,7 @@ public final class JimDemoRenderer {
           | CGBitmapInfo.byteOrder32Little.rawValue
       )
     else {
-      throw JimError.pixelBufferCreationFailed
+      throw GymError.pixelBufferCreationFailed
     }
     context.interpolationQuality = .high
     context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))

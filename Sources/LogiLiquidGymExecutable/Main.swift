@@ -1,12 +1,12 @@
 import Darwin
 import Foundation
-import LogiLiquidJim
+import LogiLiquidGym
 
 @main
-enum JimMain {
+enum GymMain {
   @MainActor
   static func main() async {
-    let exitCode = await JimCLI().run(
+    let exitCode = await GymCLI().run(
       arguments: Array(CommandLine.arguments.dropFirst())
     )
     if exitCode != 0 {

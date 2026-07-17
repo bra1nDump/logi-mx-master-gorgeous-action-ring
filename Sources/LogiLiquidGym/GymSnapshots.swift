@@ -3,11 +3,11 @@ import CoreGraphics
 import Foundation
 import ImageIO
 
-public struct JimSnapshotManifest: Codable, Equatable, Sendable {
+public struct GymSnapshotManifest: Codable, Equatable, Sendable {
   public static let currentSchemaVersion = 1
 
   public struct Entry: Codable, Equatable, Sendable {
-    public let state: JimSnapshotState
+    public let state: GymSnapshotState
     public let file: String
     public let pixelWidth: Int
     public let pixelHeight: Int
@@ -15,12 +15,12 @@ public struct JimSnapshotManifest: Codable, Equatable, Sendable {
   }
 
   public let schemaVersion: Int
-  public let configuration: JimRenderConfiguration
+  public let configuration: GymRenderConfiguration
   public let snapshots: [Entry]
 }
 
-public struct JimSnapshotDifference: Codable, Equatable, Sendable {
-  public let state: JimSnapshotState
+public struct GymSnapshotDifference: Codable, Equatable, Sendable {
+  public let state: GymSnapshotState
   public let baseline: String
   public let maximumChannelDelta: Int
   public let differentPixelRatio: Double
@@ -28,35 +28,35 @@ public struct JimSnapshotDifference: Codable, Equatable, Sendable {
 }
 
 @MainActor
-public final class JimSnapshotWorkflow {
+public final class GymSnapshotWorkflow {
   public static let manifestFileName = "manifest.json"
   public static let channelTolerance = 3
   public static let maximumDifferentPixelRatio = 0.001
 
-  private let renderer: JimRenderer
+  private let renderer: GymRenderer
 
-  public init(renderer: JimRenderer = JimRenderer()) {
+  public init(renderer: GymRenderer = GymRenderer()) {
     self.renderer = renderer
   }
 
   @discardableResult
   public func record(
     directory: URL,
-    configuration: JimRenderConfiguration = .default
-  ) async throws -> JimSnapshotManifest {
+    configuration: GymRenderConfiguration = .default
+  ) async throws -> GymSnapshotManifest {
     try configuration.validate()
     try FileManager.default.createDirectory(
       at: directory,
       withIntermediateDirectories: true
     )
 
-    var entries: [JimSnapshotManifest.Entry] = []
-    for state in JimSnapshotState.allCases {
+    var entries: [GymSnapshotManifest.Entry] = []
+    for state in GymSnapshotState.allCases {
       let image = try await renderer.render(state: state, configuration: configuration)
       let output = directory.appending(path: state.fileName, directoryHint: .notDirectory)
       try image.pngData.write(to: output, options: .atomic)
       entries.append(
-        JimSnapshotManifest.Entry(
+        GymSnapshotManifest.Entry(
           state: state,
           file: state.fileName,
           pixelWidth: image.pixelWidth,
@@ -66,8 +66,8 @@ public final class JimSnapshotWorkflow {
       )
     }
 
-    let manifest = JimSnapshotManifest(
-      schemaVersion: JimSnapshotManifest.currentSchemaVersion,
+    let manifest = GymSnapshotManifest(
+      schemaVersion: GymSnapshotManifest.currentSchemaVersion,
       configuration: configuration,
       snapshots: entries
     )
@@ -82,21 +82,21 @@ public final class JimSnapshotWorkflow {
     return manifest
   }
 
-  public func verify(directory: URL) async throws -> [JimSnapshotDifference] {
+  public func verify(directory: URL) async throws -> [GymSnapshotDifference] {
     let manifestURL = directory.appending(
       path: Self.manifestFileName,
       directoryHint: .notDirectory
     )
     let manifest = try JSONDecoder().decode(
-      JimSnapshotManifest.self,
+      GymSnapshotManifest.self,
       from: Data(contentsOf: manifestURL)
     )
-    guard manifest.schemaVersion == JimSnapshotManifest.currentSchemaVersion else {
-      throw JimError.unsupportedManifestVersion(manifest.schemaVersion)
+    guard manifest.schemaVersion == GymSnapshotManifest.currentSchemaVersion else {
+      throw GymError.unsupportedManifestVersion(manifest.schemaVersion)
     }
     try manifest.configuration.validate()
 
-    var differences: [JimSnapshotDifference] = []
+    var differences: [GymSnapshotDifference] = []
     for entry in manifest.snapshots {
       let baselineURL = directory.appending(path: entry.file, directoryHint: .notDirectory)
       let baselineData = try Data(contentsOf: baselineURL)
@@ -111,7 +111,7 @@ public final class JimSnapshotWorkflow {
         expectedHeight: entry.pixelHeight
       )
       differences.append(
-        JimSnapshotDifference(
+        GymSnapshotDifference(
           state: entry.state,
           baseline: baselineURL.path,
           maximumChannelDelta: metrics.maximumChannelDelta,
@@ -141,7 +141,7 @@ public final class JimSnapshotWorkflow {
       expectedHeight: expectedHeight
     )
     guard baselinePixels.count == currentPixels.count else {
-      throw JimError.pixelBufferMismatch
+      throw GymError.pixelBufferMismatch
     }
 
     var maximumChannelDelta = 0
@@ -179,7 +179,7 @@ public final class JimSnapshotWorkflow {
       image.width == expectedWidth,
       image.height == expectedHeight
     else {
-      throw JimError.invalidPNGDimensions(
+      throw GymError.invalidPNGDimensions(
         expectedWidth: expectedWidth,
         expectedHeight: expectedHeight
       )
@@ -205,12 +205,12 @@ public final class JimSnapshotWorkflow {
       )
       return true
     }
-    guard rendered else { throw JimError.bitmapAllocationFailed }
+    guard rendered else { throw GymError.bitmapAllocationFailed }
     return bytes
   }
 }
 
-public enum JimError: LocalizedError, Equatable {
+public enum GymError: LocalizedError, Equatable {
   case invalidDimension(name: String, value: Int)
   case invalidScale(Int)
   case bitmapAllocationFailed
@@ -259,7 +259,7 @@ public enum JimError: LocalizedError, Equatable {
     case .pixelBufferMismatch:
       "Snapshot pixel buffers do not have matching sizes."
     case .unsupportedManifestVersion(let version):
-      "Unsupported Jim manifest schema version \(version)."
+      "Unsupported Gym manifest schema version \(version)."
     case .invalidFrameRate(let framesPerSecond):
       "Invalid frame rate \(framesPerSecond); expected 12...60."
     case .invalidDuration(let duration):

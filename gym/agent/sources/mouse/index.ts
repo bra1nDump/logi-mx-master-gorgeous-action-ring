@@ -5,7 +5,7 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { join } from "node:path";
 
-const defaultPackagePath = fileURLToPath(new URL("../../../", import.meta.url));
+const defaultPackagePath = fileURLToPath(new URL("../../../../", import.meta.url));
 const maximumCapturedBytes = 1024 * 1024;
 
 export interface MouseControlError {

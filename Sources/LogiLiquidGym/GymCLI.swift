@@ -1,16 +1,16 @@
 import Foundation
 
-public struct JimCLIOutput: Codable, Equatable, Sendable {
+public struct GymCLIOutput: Codable, Equatable, Sendable {
   public let command: String
   public let ok: Bool
   public let files: [String]
-  public let differences: [JimSnapshotDifference]
+  public let differences: [GymSnapshotDifference]
 
   public init(
     command: String,
     ok: Bool,
     files: [String] = [],
-    differences: [JimSnapshotDifference] = []
+    differences: [GymSnapshotDifference] = []
   ) {
     self.command = command
     self.ok = ok
@@ -20,29 +20,29 @@ public struct JimCLIOutput: Codable, Equatable, Sendable {
 }
 
 @MainActor
-public struct JimCLI {
+public struct GymCLI {
   public static let usage = """
     usage:
-      jim list
-      jim render --state STATE --output FILE [--width N --height N --scale N]
-      jim record [--directory DIR] [--width N --height N --scale N]
-      jim verify [--directory DIR]
-      jim demo --output FILE.mp4 [--poster FILE.png] [--width N --height N --fps N]
+      gym list
+      gym render --state STATE --output FILE [--width N --height N --scale N]
+      gym record [--directory DIR] [--width N --height N --scale N]
+      gym verify [--directory DIR]
+      gym demo --output FILE.mp4 [--poster FILE.png] [--width N --height N --fps N]
 
-    states: \(JimSnapshotState.allCases.map(\.rawValue).joined(separator: ", "))
-    default snapshot directory: jim/Snapshots
+    states: \(GymSnapshotState.allCases.map(\.rawValue).joined(separator: ", "))
+    default snapshot directory: gym/visual/Snapshots
     """
 
-  private let renderer: JimRenderer
-  private let workflow: JimSnapshotWorkflow
+  private let renderer: GymRenderer
+  private let workflow: GymSnapshotWorkflow
   private let currentDirectory: URL
 
   public init(
-    renderer: JimRenderer = JimRenderer(),
+    renderer: GymRenderer = GymRenderer(),
     currentDirectory: URL = URL(filePath: FileManager.default.currentDirectoryPath)
   ) {
     self.renderer = renderer
-    self.workflow = JimSnapshotWorkflow(renderer: renderer)
+    self.workflow = GymSnapshotWorkflow(renderer: renderer)
     self.currentDirectory = currentDirectory
   }
 
@@ -53,7 +53,7 @@ public struct JimCLI {
   ) async -> Int32 {
     do {
       guard let command = arguments.first else {
-        throw JimError.usage(Self.usage)
+        throw GymError.usage(Self.usage)
       }
       switch command {
       case "help", "--help", "-h":
@@ -62,13 +62,13 @@ public struct JimCLI {
 
       case "list":
         guard arguments.count == 1 else {
-          throw JimError.usage("list accepts no options")
+          throw GymError.usage("list accepts no options")
         }
         return try emit(
-          JimCLIOutput(
+          GymCLIOutput(
             command: "list",
             ok: true,
-            files: JimSnapshotState.allCases.map(\.rawValue)
+            files: GymSnapshotState.allCases.map(\.rawValue)
           ),
           to: standardOutput
         )
@@ -76,12 +76,12 @@ public struct JimCLI {
       case "render":
         let options = try ParsedOptions(Array(arguments.dropFirst()))
         guard let rawState = options.value(for: "--state"),
-          let state = JimSnapshotState(rawValue: rawState)
+          let state = GymSnapshotState(rawValue: rawState)
         else {
-          throw JimError.usage("render requires --state with a known state")
+          throw GymError.usage("render requires --state with a known state")
         }
         guard let rawOutput = options.value(for: "--output") else {
-          throw JimError.usage("render requires --output FILE")
+          throw GymError.usage("render requires --output FILE")
         }
         try options.rejectUnknown(allowing: [
           "--state", "--output", "--width", "--height", "--scale",
@@ -95,14 +95,14 @@ public struct JimCLI {
         let image = try await renderer.render(state: state, configuration: configuration)
         try image.pngData.write(to: output, options: .atomic)
         return try emit(
-          JimCLIOutput(command: "render", ok: true, files: [output.path]),
+          GymCLIOutput(command: "render", ok: true, files: [output.path]),
           to: standardOutput
         )
 
       case "record":
         let options = try ParsedOptions(Array(arguments.dropFirst()))
         try options.rejectUnknown(allowing: ["--directory", "--width", "--height", "--scale"])
-        let directory = absoluteURL(options.value(for: "--directory") ?? "jim/Snapshots")
+        let directory = absoluteURL(options.value(for: "--directory") ?? "gym/visual/Snapshots")
         let manifest = try await workflow.record(
           directory: directory,
           configuration: try options.configuration()
@@ -110,20 +110,20 @@ public struct JimCLI {
         let files =
           manifest.snapshots.map {
             directory.appending(path: $0.file).path
-          } + [directory.appending(path: JimSnapshotWorkflow.manifestFileName).path]
+          } + [directory.appending(path: GymSnapshotWorkflow.manifestFileName).path]
         return try emit(
-          JimCLIOutput(command: "record", ok: true, files: files),
+          GymCLIOutput(command: "record", ok: true, files: files),
           to: standardOutput
         )
 
       case "verify":
         let options = try ParsedOptions(Array(arguments.dropFirst()))
         try options.rejectUnknown(allowing: ["--directory"])
-        let directory = absoluteURL(options.value(for: "--directory") ?? "jim/Snapshots")
+        let directory = absoluteURL(options.value(for: "--directory") ?? "gym/visual/Snapshots")
         let differences = try await workflow.verify(directory: directory)
         let passed = differences.allSatisfy(\.passed)
         _ = try emit(
-          JimCLIOutput(command: "verify", ok: passed, differences: differences),
+          GymCLIOutput(command: "verify", ok: passed, differences: differences),
           to: standardOutput
         )
         return passed ? 0 : 2
@@ -131,20 +131,20 @@ public struct JimCLI {
       case "demo":
         let options = try ParsedOptions(Array(arguments.dropFirst()))
         guard let rawOutput = options.value(for: "--output") else {
-          throw JimError.usage("demo requires --output FILE.mp4")
+          throw GymError.usage("demo requires --output FILE.mp4")
         }
         try options.rejectUnknown(allowing: [
           "--output", "--poster", "--width", "--height", "--fps",
         ])
         let output = absoluteURL(rawOutput)
         let poster = options.value(for: "--poster").map(absoluteURL)
-        _ = try await JimDemoRenderer().render(
+        _ = try await GymDemoRenderer().render(
           to: output,
           poster: poster,
           configuration: try options.demoConfiguration()
         )
         return try emit(
-          JimCLIOutput(
+          GymCLIOutput(
             command: "demo",
             ok: true,
             files: [output.path] + (poster.map { [$0.path] } ?? [])
@@ -153,15 +153,15 @@ public struct JimCLI {
         )
 
       default:
-        throw JimError.usage("unknown command \(command.debugDescription)\n\(Self.usage)")
+        throw GymError.usage("unknown command \(command.debugDescription)\n\(Self.usage)")
       }
     } catch {
-      standardError(Data("jim: \(error.localizedDescription)\n".utf8))
-      return error is JimError ? 64 : 1
+      standardError(Data("gym: \(error.localizedDescription)\n".utf8))
+      return error is GymError ? 64 : 1
     }
   }
 
-  private func emit(_ output: JimCLIOutput, to sink: (Data) -> Void) throws -> Int32 {
+  private func emit(_ output: GymCLIOutput, to sink: (Data) -> Void) throws -> Int32 {
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.sortedKeys, .withoutEscapingSlashes]
     var data = try encoder.encode(output)
@@ -187,13 +187,13 @@ private struct ParsedOptions {
     while index < arguments.count {
       let option = arguments[index]
       guard option.hasPrefix("--") else {
-        throw JimError.usage("unexpected argument \(option.debugDescription)")
+        throw GymError.usage("unexpected argument \(option.debugDescription)")
       }
       guard index + 1 < arguments.count else {
-        throw JimError.usage("\(option) requires a value")
+        throw GymError.usage("\(option) requires a value")
       }
       guard values[option] == nil else {
-        throw JimError.usage("duplicate option \(option)")
+        throw GymError.usage("duplicate option \(option)")
       }
       values[option] = arguments[index + 1]
       index += 2
@@ -207,31 +207,31 @@ private struct ParsedOptions {
 
   func rejectUnknown(allowing allowed: Set<String>) throws {
     if let unknown = values.keys.sorted().first(where: { !allowed.contains($0) }) {
-      throw JimError.usage("unknown option \(unknown)")
+      throw GymError.usage("unknown option \(unknown)")
     }
   }
 
-  func configuration() throws -> JimRenderConfiguration {
-    JimRenderConfiguration(
-      logicalWidth: try integer(for: "--width") ?? JimRenderConfiguration.default.logicalWidth,
-      logicalHeight: try integer(for: "--height") ?? JimRenderConfiguration.default.logicalHeight,
-      scale: try integer(for: "--scale") ?? JimRenderConfiguration.default.scale
+  func configuration() throws -> GymRenderConfiguration {
+    GymRenderConfiguration(
+      logicalWidth: try integer(for: "--width") ?? GymRenderConfiguration.default.logicalWidth,
+      logicalHeight: try integer(for: "--height") ?? GymRenderConfiguration.default.logicalHeight,
+      scale: try integer(for: "--scale") ?? GymRenderConfiguration.default.scale
     )
   }
 
-  func demoConfiguration() throws -> JimDemoConfiguration {
-    JimDemoConfiguration(
-      pixelWidth: try integer(for: "--width") ?? JimDemoConfiguration.default.pixelWidth,
-      pixelHeight: try integer(for: "--height") ?? JimDemoConfiguration.default.pixelHeight,
+  func demoConfiguration() throws -> GymDemoConfiguration {
+    GymDemoConfiguration(
+      pixelWidth: try integer(for: "--width") ?? GymDemoConfiguration.default.pixelWidth,
+      pixelHeight: try integer(for: "--height") ?? GymDemoConfiguration.default.pixelHeight,
       framesPerSecond: try integer(for: "--fps")
-        ?? JimDemoConfiguration.default.framesPerSecond
+        ?? GymDemoConfiguration.default.framesPerSecond
     )
   }
 
   private func integer(for option: String) throws -> Int? {
     guard let raw = values[option] else { return nil }
     guard let value = Int(raw) else {
-      throw JimError.usage("\(option) requires an integer")
+      throw GymError.usage("\(option) requires an integer")
     }
     return value
   }

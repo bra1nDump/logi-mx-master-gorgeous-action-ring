@@ -14,12 +14,12 @@ let package = Package(
     .library(name: "LogiLiquidService", targets: ["LogiLiquidService"]),
     .library(name: "LogiLiquidDaemon", targets: ["LogiLiquidDaemon"]),
     .library(name: "LogiLiquidUI", targets: ["LogiLiquidUI"]),
-    .library(name: "LogiLiquidJim", targets: ["LogiLiquidJim"]),
+    .library(name: "LogiLiquidGym", targets: ["LogiLiquidGym"]),
     .executable(name: "logi-liquid", targets: ["LogiLiquidCLI"]),
     .executable(name: "logi-liquid-daemon", targets: ["LogiLiquidDaemonExecutable"]),
     .executable(name: "logi-liquid-daemon-fixture", targets: ["LogiLiquidDaemonFixture"]),
     .executable(name: "logi-liquid-overlay", targets: ["LogiLiquidOverlay"]),
-    .executable(name: "jim", targets: ["LogiLiquidJimExecutable"]),
+    .executable(name: "gym", targets: ["LogiLiquidGymExecutable"]),
   ],
   targets: [
     .target(name: "LogiLiquidCore"),
@@ -85,7 +85,7 @@ let package = Package(
       resources: [.process("Resources")]
     ),
     .target(
-      name: "LogiLiquidJim",
+      name: "LogiLiquidGym",
       dependencies: ["LogiLiquidCore", "LogiLiquidUI"],
       linkerSettings: [
         .linkedFramework("AppKit"),
@@ -97,8 +97,8 @@ let package = Package(
       ]
     ),
     .executableTarget(
-      name: "LogiLiquidJimExecutable",
-      dependencies: ["LogiLiquidJim"]
+      name: "LogiLiquidGymExecutable",
+      dependencies: ["LogiLiquidGym"]
     ),
     .executableTarget(
       name: "LogiLiquidOverlay",
@@ -143,8 +143,8 @@ let package = Package(
       dependencies: ["LogiLiquidUI", "LogiLiquidCore"]
     ),
     .testTarget(
-      name: "LogiLiquidJimTests",
-      dependencies: ["LogiLiquidJim", "LogiLiquidCore", "LogiLiquidUI"]
+      name: "LogiLiquidGymTests",
+      dependencies: ["LogiLiquidGym", "LogiLiquidCore", "LogiLiquidUI"]
     ),
   ],
   swiftLanguageModes: [.v6]

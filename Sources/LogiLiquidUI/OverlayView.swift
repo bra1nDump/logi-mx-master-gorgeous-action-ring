@@ -12,7 +12,7 @@ public struct OverlayView: View {
   /// Where the origin falls in this display's local top-left space.
   private let localOrigin: CGPoint
   private let onPrimaryClick: () -> Void
-  /// Jim supplies this only for clock-free frame rendering. `nil` preserves the
+  /// Gym supplies this only for clock-free frame rendering. `nil` preserves the
   /// production on-appear animation exactly.
   private let presentationProgressOverride: CGFloat?
 

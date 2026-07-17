@@ -5,8 +5,8 @@ import LogiLiquidUI
 import ScreenCaptureKit
 import SwiftUI
 
-public struct JimRenderConfiguration: Codable, Equatable, Sendable {
-  public static let `default` = JimRenderConfiguration(
+public struct GymRenderConfiguration: Codable, Equatable, Sendable {
+  public static let `default` = GymRenderConfiguration(
     logicalWidth: 720,
     logicalHeight: 520,
     scale: 2
@@ -31,25 +31,25 @@ public struct JimRenderConfiguration: Codable, Equatable, Sendable {
 
   public func validate() throws {
     guard (320...4_096).contains(logicalWidth) else {
-      throw JimError.invalidDimension(name: "width", value: logicalWidth)
+      throw GymError.invalidDimension(name: "width", value: logicalWidth)
     }
     guard (320...4_096).contains(logicalHeight) else {
-      throw JimError.invalidDimension(name: "height", value: logicalHeight)
+      throw GymError.invalidDimension(name: "height", value: logicalHeight)
     }
     guard (1...4).contains(scale) else {
-      throw JimError.invalidScale(scale)
+      throw GymError.invalidScale(scale)
     }
   }
 }
 
-public struct JimRenderedImage: Sendable {
-  public let state: JimSnapshotState
+public struct GymRenderedImage: Sendable {
+  public let state: GymSnapshotState
   public let pngData: Data
   public let pixelWidth: Int
   public let pixelHeight: Int
 
   public init(
-    state: JimSnapshotState,
+    state: GymSnapshotState,
     pngData: Data,
     pixelWidth: Int,
     pixelHeight: Int
@@ -65,15 +65,15 @@ public struct JimRenderedImage: Sendable {
 /// AppKit window. This is intentional: native Liquid Glass needs a hosted view
 /// hierarchy and window-backed environment to resolve its visual material.
 @MainActor
-public final class JimRenderer {
+public final class GymRenderer {
   public init() {}
 
   public func render(
-    state: JimSnapshotState,
-    configuration: JimRenderConfiguration = .default
-  ) async throws -> JimRenderedImage {
+    state: GymSnapshotState,
+    configuration: GymRenderConfiguration = .default
+  ) async throws -> GymRenderedImage {
     try configuration.validate()
-    let scenario = try JimScenario.make(state, logicalSize: configuration.logicalSize)
+    let scenario = try GymScenario.make(state, logicalSize: configuration.logicalSize)
 
     let application = NSApplication.shared
     application.setActivationPolicy(.prohibited)
@@ -81,11 +81,11 @@ public final class JimRenderer {
     application.finishLaunching()
 
     let backdropView = NSHostingView(
-      rootView: JimBackdrop()
+      rootView: GymBackdrop()
         .frame(width: configuration.logicalSize.width, height: configuration.logicalSize.height)
         .environment(\.colorScheme, .dark)
     )
-    let overlayScene = JimOverlayScene(
+    let overlayScene = GymOverlayScene(
       model: scenario.model,
       logicalSize: configuration.logicalSize
     )
@@ -118,7 +118,7 @@ public final class JimRenderer {
     // content inventory. A unique title plus the CGWindowID prevents a later
     // render from accidentally capturing that stale entry if AppKit reuses a
     // window number.
-    let windowTitle = "Jim Snapshot Host \(UUID().uuidString)"
+    let windowTitle = "Gym Snapshot Host \(UUID().uuidString)"
     window.title = windowTitle
     window.collectionBehavior = [.stationary]
     window.level = .floating
@@ -164,10 +164,10 @@ public final class JimRenderer {
     )
     let bitmap = NSBitmapImageRep(cgImage: capturedImage)
     guard let pngData = bitmap.representation(using: .png, properties: [:]) else {
-      throw JimError.pngEncodingFailed
+      throw GymError.pngEncodingFailed
     }
 
-    return JimRenderedImage(
+    return GymRenderedImage(
       state: state,
       pngData: pngData,
       pixelWidth: bitmap.pixelsWide,
@@ -196,14 +196,14 @@ public final class JimRenderer {
       try await Task.sleep(for: .milliseconds(50))
     }
     guard let shareableWindow else {
-      throw JimError.hostedWindowUnavailable(window.windowNumber)
+      throw GymError.hostedWindowUnavailable(window.windowNumber)
     }
     let capturedFrame = shareableWindow.frame
     guard
       abs(capturedFrame.width - expectedLogicalSize.width) < 0.5,
       abs(capturedFrame.height - expectedLogicalSize.height) < 0.5
     else {
-      throw JimError.hostedWindowFrameMismatch(
+      throw GymError.hostedWindowFrameMismatch(
         expectedWidth: Int(expectedLogicalSize.width),
         expectedHeight: Int(expectedLogicalSize.height),
         actualWidth: capturedFrame.width,
@@ -225,7 +225,7 @@ public final class JimRenderer {
   }
 }
 
-private struct JimOverlayScene: View {
+private struct GymOverlayScene: View {
   let model: OverlayRenderModel
   let logicalSize: CGSize
 
@@ -242,7 +242,7 @@ private struct JimOverlayScene: View {
 
 /// A stable wallpaper gives translucent glass actual content to refract while
 /// keeping snapshots independent of the user's desktop.
-private struct JimBackdrop: View {
+private struct GymBackdrop: View {
   var body: some View {
     ZStack {
       LinearGradient(
@@ -264,13 +264,13 @@ private struct JimBackdrop: View {
         .frame(width: 250, height: 250)
         .blur(radius: 25)
         .offset(x: 235, y: 155)
-      JimBackdropLines()
+      GymBackdropLines()
         .stroke(Color.white.opacity(0.055), lineWidth: 1)
     }
   }
 }
 
-private struct JimBackdropLines: Shape {
+private struct GymBackdropLines: Shape {
   func path(in rect: CGRect) -> Path {
     var path = Path()
     let spacing: CGFloat = 32

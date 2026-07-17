@@ -4,26 +4,26 @@ import ImageIO
 import LogiLiquidCore
 import XCTest
 
-@testable import LogiLiquidJim
+@testable import LogiLiquidGym
 
-final class JimRendererTests: XCTestCase {
-  private let compactConfiguration = JimRenderConfiguration(
+final class GymRendererTests: XCTestCase {
+  private let compactConfiguration = GymRenderConfiguration(
     logicalWidth: 360,
     logicalHeight: 360,
     scale: 1
   )
 
   func testDemoTimelineCoversDesktopBuzzInvocationMovementSuctionCommitAndDismiss() throws {
-    let configuration = JimDemoConfiguration(
+    let configuration = GymDemoConfiguration(
       pixelWidth: 900,
       pixelHeight: 600,
       framesPerSecond: 30
     )
-    let timeline = try JimDemoTimeline(configuration: configuration)
+    let timeline = try GymDemoTimeline(configuration: configuration)
     let frames = (0..<configuration.frameCount).map(timeline.frame(at:))
 
     XCTAssertEqual(configuration.frameCount, 84)
-    XCTAssertEqual(Set(frames.map(\.phase)), Set(JimDemoPhase.allCases))
+    XCTAssertEqual(Set(frames.map(\.phase)), Set(GymDemoPhase.allCases))
 
     // The video opens and closes on a plain desktop with the pointer visible,
     // so it loops cleanly.
@@ -81,13 +81,13 @@ final class JimRendererTests: XCTestCase {
   @MainActor
   func testCLIDemoWritesH264VideoAndPosterAtExactDimensions() async throws {
     let directory = FileManager.default.temporaryDirectory.appending(
-      path: "jim-demo-tests-\(UUID().uuidString)",
+      path: "gym-demo-tests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
     defer { try? FileManager.default.removeItem(at: directory) }
     var standardOutput = Data()
     var standardError = Data()
-    let exitCode = await JimCLI(currentDirectory: directory).run(
+    let exitCode = await GymCLI(currentDirectory: directory).run(
       arguments: [
         "demo", "--output", "demo.mp4", "--poster", "poster.png",
         "--width", "320", "--height", "320", "--fps", "15",
@@ -98,7 +98,7 @@ final class JimRendererTests: XCTestCase {
 
     XCTAssertEqual(exitCode, 0)
     XCTAssertTrue(standardError.isEmpty)
-    let output = try JSONDecoder().decode(JimCLIOutput.self, from: standardOutput)
+    let output = try JSONDecoder().decode(GymCLIOutput.self, from: standardOutput)
     XCTAssertEqual(output.command, "demo")
     XCTAssertTrue(output.ok)
     XCTAssertEqual(
@@ -110,7 +110,7 @@ final class JimRendererTests: XCTestCase {
     )
 
     let videoURL = directory.appending(path: "demo.mp4")
-    let artifact = try await JimDemoRenderer.inspect(videoURL)
+    let artifact = try await GymDemoRenderer.inspect(videoURL)
     XCTAssertEqual(artifact.pixelWidth, 320)
     XCTAssertEqual(artifact.pixelHeight, 320)
     XCTAssertEqual(artifact.frameCount, 42)
@@ -131,10 +131,10 @@ final class JimRendererTests: XCTestCase {
 
   func testRepresentativeScenariosComeFromRealCoreTransitions() throws {
     let size = CGSize(width: 720, height: 520)
-    let invoked = try JimScenario.make(.invoked, logicalSize: size)
-    let targeting = try JimScenario.make(.targeting, logicalSize: size)
-    let latched = try JimScenario.make(.latchedSuctionThreshold, logicalSize: size)
-    let committed = try JimScenario.make(.committed, logicalSize: size)
+    let invoked = try GymScenario.make(.invoked, logicalSize: size)
+    let targeting = try GymScenario.make(.targeting, logicalSize: size)
+    let latched = try GymScenario.make(.latchedSuctionThreshold, logicalSize: size)
+    let committed = try GymScenario.make(.committed, logicalSize: size)
 
     XCTAssertEqual(invoked.transition.frame.phase, .invoked)
     XCTAssertNil(invoked.transition.frame.currentTarget)
@@ -165,7 +165,7 @@ final class JimRendererTests: XCTestCase {
 
   @MainActor
   func testWindowHostedRendererWritesNonemptyPNGAtExactDimensions() async throws {
-    let image = try await JimRenderer().render(
+    let image = try await GymRenderer().render(
       state: .latchedSuctionThreshold,
       configuration: compactConfiguration
     )
@@ -188,20 +188,20 @@ final class JimRendererTests: XCTestCase {
   @MainActor
   func testRecordThenVerifySnapshotWorkflow() async throws {
     let directory = FileManager.default.temporaryDirectory.appending(
-      path: "jim-tests-\(UUID().uuidString)",
+      path: "gym-tests-\(UUID().uuidString)",
       directoryHint: .isDirectory
     )
     defer { try? FileManager.default.removeItem(at: directory) }
 
-    let workflow = JimSnapshotWorkflow()
+    let workflow = GymSnapshotWorkflow()
     let manifest = try await workflow.record(
       directory: directory,
       configuration: compactConfiguration
     )
-    XCTAssertEqual(manifest.snapshots.map(\.state), JimSnapshotState.allCases)
+    XCTAssertEqual(manifest.snapshots.map(\.state), GymSnapshotState.allCases)
     XCTAssertTrue(
       FileManager.default.fileExists(
-        atPath: directory.appending(path: JimSnapshotWorkflow.manifestFileName).path
+        atPath: directory.appending(path: GymSnapshotWorkflow.manifestFileName).path
       )
     )
     for entry in manifest.snapshots {
@@ -219,7 +219,7 @@ final class JimRendererTests: XCTestCase {
     }
 
     let differences = try await workflow.verify(directory: directory)
-    XCTAssertEqual(differences.map(\.state), JimSnapshotState.allCases)
+    XCTAssertEqual(differences.map(\.state), GymSnapshotState.allCases)
     XCTAssertTrue(differences.allSatisfy(\.passed))
   }
 
@@ -227,7 +227,7 @@ final class JimRendererTests: XCTestCase {
   func testCLIListIsStableJSONForAgents() async throws {
     var standardOutput = Data()
     var standardError = Data()
-    let exitCode = await JimCLI().run(
+    let exitCode = await GymCLI().run(
       arguments: ["list"],
       standardOutput: { standardOutput.append($0) },
       standardError: { standardError.append($0) }
@@ -235,10 +235,10 @@ final class JimRendererTests: XCTestCase {
 
     XCTAssertEqual(exitCode, 0)
     XCTAssertTrue(standardError.isEmpty)
-    let output = try JSONDecoder().decode(JimCLIOutput.self, from: standardOutput)
+    let output = try JSONDecoder().decode(GymCLIOutput.self, from: standardOutput)
     XCTAssertEqual(output.command, "list")
     XCTAssertTrue(output.ok)
-    XCTAssertEqual(output.files, JimSnapshotState.allCases.map(\.rawValue))
+    XCTAssertEqual(output.files, GymSnapshotState.allCases.map(\.rawValue))
   }
 
   func testCheckedInSnapshotBaselinesCoverEntireFrame() throws {
@@ -247,11 +247,11 @@ final class JimRendererTests: XCTestCase {
       .deletingLastPathComponent()
       .deletingLastPathComponent()
     let snapshotDirectory = repositoryRoot.appending(
-      path: "jim/Snapshots",
+      path: "gym/visual/Snapshots",
       directoryHint: .isDirectory
     )
 
-    for state in JimSnapshotState.allCases {
+    for state in GymSnapshotState.allCases {
       let data = try Data(
         contentsOf: snapshotDirectory.appending(path: state.fileName)
       )

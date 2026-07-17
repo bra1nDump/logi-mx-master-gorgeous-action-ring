@@ -2,8 +2,8 @@ import CoreGraphics
 import LogiLiquidCore
 import LogiLiquidUI
 
-/// Stable, representative checkpoints rendered by Jim.
-public enum JimSnapshotState: String, Codable, CaseIterable, Sendable {
+/// Stable, representative checkpoints rendered by Gym.
+public enum GymSnapshotState: String, Codable, CaseIterable, Sendable {
   case invoked
   case targeting
   case latchedSuctionThreshold = "latched-suction-threshold"
@@ -16,13 +16,13 @@ public enum JimSnapshotState: String, Codable, CaseIterable, Sendable {
 
 /// A model produced through the real interaction machine, plus the transition
 /// retained for tests and agent diagnostics.
-public struct JimScenario: Sendable {
-  public let state: JimSnapshotState
+public struct GymScenario: Sendable {
+  public let state: GymSnapshotState
   public let transition: RingTransition
   public let model: OverlayRenderModel
 
   public init(
-    state: JimSnapshotState,
+    state: GymSnapshotState,
     transition: RingTransition
   ) {
     self.state = state
@@ -31,9 +31,9 @@ public struct JimScenario: Sendable {
   }
 
   public static func make(
-    _ state: JimSnapshotState,
+    _ state: GymSnapshotState,
     logicalSize: CGSize
-  ) throws -> JimScenario {
+  ) throws -> GymScenario {
     let origin = Vector2(
       x: Double(logicalSize.width / 2),
       y: Double(logicalSize.height / 2)
@@ -51,7 +51,7 @@ public struct JimScenario: Sendable {
 
     switch state {
     case .invoked:
-      return JimScenario(state: state, transition: invoked)
+      return GymScenario(state: state, transition: invoked)
 
     case .targeting:
       let profile = RingInteractionProfile.default
@@ -61,20 +61,20 @@ public struct JimScenario: Sendable {
       let targeting = machine.handle(
         .pointerDelta(Vector2(x: 0, y: targetingY))
       )
-      return JimScenario(state: state, transition: targeting)
+      return GymScenario(state: state, transition: targeting)
 
     case .latchedSuctionThreshold:
       let latched = machine.handle(
         .pointerDelta(Vector2(x: 0, y: latchThresholdPointerY()))
       )
-      return JimScenario(state: state, transition: latched)
+      return GymScenario(state: state, transition: latched)
 
     case .committed:
       _ = machine.handle(
         .pointerDelta(Vector2(x: 0, y: latchThresholdPointerY()))
       )
       let committed = machine.handle(.completeCommit)
-      return JimScenario(state: state, transition: committed)
+      return GymScenario(state: state, transition: committed)
     }
   }
 

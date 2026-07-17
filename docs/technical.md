@@ -108,7 +108,7 @@ has one configured.
 
 The ChatGPT target uses the package's bundled monochrome OpenAI/ChatGPT mark so
 it reads like the surrounding SF Symbols instead of nesting the full app badge
-inside a glass circle. Production and Jim render the same self-contained asset;
+inside a glass circle. Production and Gym render the same self-contained asset;
 no installed-app resource path is consulted.
 
 ## Logi Options+ ownership
@@ -285,20 +285,20 @@ through 255:
 ./.build/release/logi-liquid haptic play 0
 ```
 
-## Jim visual snapshots
+## Gym visual snapshots
 
-Jim renders the real native overlay in representative interaction states and
+Gym renders the real native overlay in representative interaction states and
 captures deterministic PNG baselines:
 
 ```sh
-./.build/release/jim list
-./.build/release/jim render --state targeting --output /tmp/jim-targeting.png
-./.build/release/jim record --directory jim/Snapshots
-./.build/release/jim verify --directory jim/Snapshots
+./.build/release/gym list
+./.build/release/gym render --state targeting --output /tmp/gym-targeting.png
+./.build/release/gym record --directory gym/visual/Snapshots
+./.build/release/gym verify --directory gym/visual/Snapshots
 ```
 
 The checked-in states are `invoked`, `targeting`, `latched-suction-threshold`, and
-`committed`. See [`jim/README.md`](../jim/README.md) for dimensions, comparison
+`committed`. See [`gym/visual/README.md`](../gym/visual/README.md) for dimensions, comparison
 tolerances, and the manifest contract.
 
 Use `--socket /absolute/path.sock` before any daemon command to target an
