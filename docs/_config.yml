@@ -1,7 +1,7 @@
 title: CommandBloom
 description: A native, open-source Actions Ring alternative for Logitech MX Master 4 on macOS.
 url: https://bra1ndump.github.io
-baseurl: /command-bloom
-repository: bra1nDump/command-bloom
+baseurl: /logi-mx-master-gorgeous-action-ring
+repository: bra1nDump/logi-mx-master-gorgeous-action-ring
 exclude:
   - technical.md
