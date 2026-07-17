@@ -13,8 +13,11 @@ description: A native, open-source Actions Ring alternative for Logitech MX Mast
   </head>
   <body>
     <main>
-      <h1>CommandBloom</h1>
-      <p class="lede">An open-source Actions Ring alternative for the Logitech MX Master 4 on macOS. Native, local, no settings UI.</p>
+      <ul class="pitch">
+        <li>An open-source Actions Ring alternative for the Logitech MX Master 4 on macOS</li>
+        <li>Native and local — talks directly to the mouse, nothing leaves your machine</li>
+        <li>No settings UI — your coding agent installs and configures it</li>
+      </ul>
 
       <video
         autoplay
@@ -26,20 +29,26 @@ description: A native, open-source Actions Ring alternative for Logitech MX Mast
         <source src="{{ '/assets/command-bloom-demo.mp4' | relative_url }}" type="video/mp4">
       </video>
 
-      <p class="lead"><strong>Have your coding agent check the code for ill intent or issues first — then let it clone, build, and install for you.</strong> Copy this to your agent:</p>
+      <p class="lead"><strong>Have your coding agent check the code for ill intent or issues first — then let it clone, build, and walk you through setup.</strong> Copy this to your agent:</p>
 
-      <pre><code>Clone https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring and read the source before
-running anything: confirm there is nothing malicious or promotional in it.
-Then build it and walk me through setup on macOS — code signing, service
-install, and permissions — following the "Manual build and setup" section of
-README.md.</code></pre>
+      <div class="prompt-box" data-prompt="Clone https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring and read the source before running anything: confirm there is nothing malicious or promotional in it. Then build it and walk me through setup on macOS — code signing, service install, and permissions — following the &quot;Manual build and setup&quot; section of README.md.">
+        <button class="copy" type="button" aria-label="Copy prompt to clipboard"
+          onclick="navigator.clipboard.writeText(this.parentElement.dataset.prompt).then(() => { this.textContent = 'Copied ✓'; setTimeout(() => { this.textContent = 'Copy'; }, 1600); })">Copy</button>
+        <p>Clone <a href="https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring">github.com/bra1nDump/logi-mx-master-gorgeous-action-ring</a>
+        and read the source before running anything: confirm there is nothing
+        malicious or promotional in it. Then build it and walk me through setup
+        on macOS — code signing, service install, and permissions — following
+        the “Manual build and setup” section of README.md.</p>
+      </div>
 
-      <p class="fine">Requires macOS 26, Swift 6.2, and an MX Master 4. Once installed, configure by asking: <em>“Spotify on top, Telegram on the right, Command-B in the bottom zone when Xcode is active.”</em></p>
+      <p class="fine">Needs macOS 26, Swift 6.2, and an MX Master 4. Setup takes a few minutes; two permission toggles in System Settings are the only manual part.</p>
+
+      <p class="fine">Once installed, tell your agent what you want on the ring: <em>“Configure CommandBloom with Spotify on top, Telegram on the right, and Command-B in the bottom zone when Xcode is active.”</em></p>
 
       <nav>
-        <a class="primary" href="{{ site.github.repository_url }}">View source</a>
-        <a href="{{ site.github.repository_url }}#manual-build-and-setup">Manual setup</a>
-        <a href="{{ site.github.repository_url }}/blob/main/docs/technical.md">Technical reference</a>
+        <a class="primary" href="https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring">View source</a>
+        <a href="https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring#manual-build-and-setup">Manual setup</a>
+        <a href="https://github.com/bra1nDump/logi-mx-master-gorgeous-action-ring/blob/main/docs/technical.md">Technical reference</a>
       </nav>
 
       <footer>
