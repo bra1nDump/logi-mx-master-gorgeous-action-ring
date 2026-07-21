@@ -6,7 +6,7 @@ public enum RingInteractionTiming {
   /// Time the exact-overlap latch remains onscreen while the bubble is sucked
   /// into its target.
   public static let latchedSuctionDuration: TimeInterval = 0.22
-  /// Time the terminal overlay takes to fade and contract after suction.
+  /// Time the terminal overlay takes to fade after suction.
   public static let overlayDismissalDuration: TimeInterval = 0.14
   /// A small IPC margin ensures the overlay has received and finished its
   /// terminal animation before the system cursor returns.
@@ -203,6 +203,9 @@ public struct RingFrame: Codable, Equatable, Sendable {
   public let movingBubbleOffset: Vector2
   public let currentTarget: RingTarget?
   public let mergeProgress: Double
+  /// 0…1 approach of the moving bubble toward the current target: 0 at the
+  /// invocation origin, 1 once fused. Drives gradual selection lighting.
+  public let approachProgress: Double
 }
 
 /// One pure state transition plus the one-shot effects an outer process performs.
@@ -224,6 +227,7 @@ extension RingFrame {
     case movingBubbleOffset
     case currentTarget
     case mergeProgress
+    case approachProgress
   }
 
   public init(from decoder: any Decoder) throws {
@@ -244,6 +248,8 @@ extension RingFrame {
     movingBubbleOffset = try container.decode(Vector2.self, forKey: .movingBubbleOffset)
     currentTarget = try container.decodeIfPresent(RingTarget.self, forKey: .currentTarget)
     mergeProgress = try container.decode(Double.self, forKey: .mergeProgress)
+    // Tolerates frames recorded before approach lighting existed.
+    approachProgress = try container.decodeIfPresent(Double.self, forKey: .approachProgress) ?? 0
   }
 
   public func encode(to encoder: any Encoder) throws {
@@ -261,6 +267,7 @@ extension RingFrame {
       try container.encodeNil(forKey: .currentTarget)
     }
     try container.encode(mergeProgress, forKey: .mergeProgress)
+    try container.encode(approachProgress, forKey: .approachProgress)
   }
 }
 
@@ -431,6 +438,7 @@ public struct RingInteractionMachine: Sendable {
   private var movingBubbleOffset = Vector2.zero
   private var currentTarget: RingTarget?
   private var mergeProgress = 0.0
+  private var approachProgress = 0.0
 
   public init(
     configuration: MouseConfiguration,
@@ -533,6 +541,7 @@ public struct RingInteractionMachine: Sendable {
     phase = .latched
     movingBubbleOffset = target.vectorFromOrigin
     mergeProgress = 1
+    approachProgress = 1
     return transition(
       haptic: .play(waveformID: 0),
       action: ActionInvocation(
@@ -578,12 +587,14 @@ public struct RingInteractionMachine: Sendable {
     movingBubbleOffset = .zero
     currentTarget = nil
     mergeProgress = 0
+    approachProgress = 0
   }
 
   private mutating func updateTargetAndMerge() {
     guard accumulatedPointerDelta.magnitude >= profile.targetingDeadZone else {
       currentTarget = nil
       mergeProgress = 0
+      approachProgress = 0
       return
     }
 
@@ -598,11 +609,13 @@ public struct RingInteractionMachine: Sendable {
 
     guard let currentTarget else {
       mergeProgress = 0
+      approachProgress = 0
       return
     }
 
     let distance = accumulatedPointerDelta.distance(to: currentTarget.vectorFromOrigin)
     mergeProgress = min(max(1 - (distance / profile.mergeStartDistance), 0), 1)
+    approachProgress = min(max(1 - (distance / profile.ringRadius), 0), 1)
   }
 
   /// Fraction of the moving bubble's area currently covered by the selected
@@ -641,7 +654,8 @@ public struct RingInteractionMachine: Sendable {
         accumulatedPointerDelta: accumulatedPointerDelta,
         movingBubbleOffset: movingBubbleOffset,
         currentTarget: currentTarget,
-        mergeProgress: mergeProgress
+        mergeProgress: mergeProgress,
+        approachProgress: approachProgress
       ),
       cursorVisibilityIntent: cursor,
       hapticIntent: haptic,

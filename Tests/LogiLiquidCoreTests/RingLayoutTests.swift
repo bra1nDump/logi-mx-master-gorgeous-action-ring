@@ -22,14 +22,14 @@ final class RingLayoutTests: XCTestCase {
         top: ["Spotify"],
         right: ["Telegram", "ChatGPT"],
         bottom: [],
-        left: ["Aqua", "Capture", "Record"]
+        left: ["Record", "Capture", "Aqua"]
       ),
       radius: 100
     )
 
     XCTAssertEqual(
       layout.targets.map(\.actionName),
-      ["Spotify", "Telegram", "ChatGPT", "Aqua", "Capture", "Record"]
+      ["Spotify", "Telegram", "ChatGPT", "Record", "Capture", "Aqua"]
     )
     XCTAssertEqual(
       layout.targets.map(\.zone),
@@ -41,9 +41,9 @@ final class RingLayoutTests: XCTestCase {
     assertVector(layout.targets[0].vectorFromOrigin, x: 0, y: -100)
     assertVector(layout.targets[1].vectorFromOrigin, x: 86.602_540, y: -50)
     assertVector(layout.targets[2].vectorFromOrigin, x: 86.602_540, y: 50)
-    assertVector(layout.targets[3].vectorFromOrigin, x: -76.604_444, y: 64.278_761)
+    assertVector(layout.targets[3].vectorFromOrigin, x: -76.604_444, y: -64.278_761)
     assertVector(layout.targets[4].vectorFromOrigin, x: -100, y: 0)
-    assertVector(layout.targets[5].vectorFromOrigin, x: -76.604_444, y: -64.278_761)
+    assertVector(layout.targets[5].vectorFromOrigin, x: -76.604_444, y: 64.278_761)
 
     let bottom = try XCTUnwrap(layout.zones.first { $0.zone == .bottom })
     XCTAssertTrue(bottom.actionNames.isEmpty)

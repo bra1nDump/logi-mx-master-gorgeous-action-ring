@@ -29,6 +29,7 @@ interface RingTransition {
   cursorVisibilityIntent: "hide" | "none" | "restore";
   frame: {
     currentTarget: { actionName: string; zone: CardinalZone } | null;
+    approachProgress: number;
     mergeProgress: number;
     phase: "cancelled" | "committed" | "idle" | "invoked" | "latched" | "tracking";
     targetVectors: Array<{ actionName: string; index: number; zone: CardinalZone }>;

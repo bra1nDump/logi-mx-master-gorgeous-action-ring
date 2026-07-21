@@ -207,6 +207,10 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
     let driver: any MXMaster4HIDDriving
     let snapshot: SensePanelDiversionSnapshot
     let handler: @Sendable (MouseDaemonHIDEvent) -> Void
+    private let eventStateLock = NSLock()
+    private var inputSuspended = false
+    private var sensePanelPressed = false
+    private var discardNextSensePanelRawXY = false
     var stopRequested = false
     var cleanupError: (any Error)?
 
@@ -218,6 +222,49 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
       self.driver = driver
       self.snapshot = snapshot
       self.handler = handler
+    }
+
+    func suspendInput() {
+      eventStateLock.withLock {
+        inputSuspended = true
+        sensePanelPressed = false
+        discardNextSensePanelRawXY = false
+      }
+    }
+
+    func resumeInput() {
+      eventStateLock.withLock {
+        sensePanelPressed = false
+        discardNextSensePanelRawXY = false
+        inputSuspended = false
+      }
+    }
+
+    func resetInputEdges() {
+      eventStateLock.withLock {
+        sensePanelPressed = false
+        discardNextSensePanelRawXY = false
+      }
+    }
+
+    func updateSensePanelPressed(_ isPressed: Bool) -> Bool? {
+      eventStateLock.withLock {
+        guard !inputSuspended, isPressed != sensePanelPressed else { return nil }
+        sensePanelPressed = isPressed
+        discardNextSensePanelRawXY = isPressed
+        return isPressed
+      }
+    }
+
+    func shouldForwardRawXY() -> Bool {
+      eventStateLock.withLock {
+        guard !inputSuspended, sensePanelPressed else { return false }
+        if discardNextSensePanelRawXY {
+          discardNextSensePanelRawXY = false
+          return false
+        }
+        return true
+      }
     }
   }
 
@@ -235,6 +282,7 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
 
   private var context: ActiveContext?
   private var starting = false
+  private var healthProbeRequestedGeneration: UInt64?
   public private(set) var lastFailureDescription: String?
 
   public convenience init(
@@ -415,6 +463,28 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
     return try driver.inspect(diversionActive: false)
   }
 
+  public func requestHealthProbe(generation: UInt64) {
+    lifecycle.lock()
+    if let context {
+      context.resumeInput()
+      healthProbeRequestedGeneration = generation
+    }
+    lifecycle.unlock()
+  }
+
+  public func suspendInputForSleep() {
+    lifecycle.lock()
+    healthProbeRequestedGeneration = nil
+    context?.suspendInput()
+    lifecycle.unlock()
+  }
+
+  public func resumeInputAfterSleep() {
+    lifecycle.lock()
+    context?.resumeInput()
+    lifecycle.unlock()
+  }
+
   public func playHaptic(waveformID: UInt8) throws {
     lifecycle.lock()
     guard let activeContext = context, !activeContext.stopRequested else {
@@ -427,8 +497,6 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
   }
 
   private func runEventLoop(_ activeContext: ActiveContext) {
-    var sensePanelPressed = false
-    var discardNextSensePanelRawXY = false
     var terminalError: (any Error)?
     var lastUptime = uptimeProvider()
     var lastWallClock = wallClockProvider()
@@ -449,9 +517,14 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
           wallDelta - (uptime - lastUptime) > Self.sleepJumpThreshold
         lastUptime = uptime
         lastWallClock = wallClock
-        if sleptSinceLastPoll || uptime - lastProbeUptime >= healthProbeInterval {
+        let probeGeneration = consumeHealthProbeRequest(for: activeContext)
+        if probeGeneration != nil || sleptSinceLastPoll
+          || uptime - lastProbeUptime >= healthProbeInterval
+        {
           lastProbeUptime = uptime
-          if sleptSinceLastPoll {
+          if probeGeneration != nil {
+            DaemonLog.log("wake notification received; verifying the Sense Panel diversion")
+          } else if sleptSinceLastPoll {
             DaemonLog.log("system wake detected; verifying the Sense Panel diversion")
           }
           let reporting = try activeContext.driver.sensePanelReportingState(
@@ -463,8 +536,10 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
               "the device dropped its Sense Panel diversion; re-applying"
             )
             try activeContext.driver.applyDiversion(activeContext.snapshot)
-            sensePanelPressed = false
-            discardNextSensePanelRawXY = false
+            activeContext.resetInputEdges()
+          }
+          if let probeGeneration {
+            activeContext.handler(.wakeHealthProbeSucceeded(generation: probeGeneration))
           }
         }
 
@@ -490,22 +565,16 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
           let isPressed = controlIDs.contains(
             ReprogrammableControlsV4.sensePanelControlID
           )
-          if isPressed != sensePanelPressed {
-            sensePanelPressed = isPressed
-            discardNextSensePanelRawXY = isPressed
+          if let acceptedPressed = activeContext.updateSensePanelPressed(isPressed) {
             activeContext.handler(
-              isPressed ? .sensePanelPressed : .sensePanelReleased
+              acceptedPressed ? .sensePanelPressed : .sensePanelReleased
             )
           }
         case .rawXY(let dx, let dy):
-          guard sensePanelPressed else { continue }
           // The device emits one stale, absolute-looking sample on each down
           // edge (observed as -3091, -7254). Arm on the edge and discard only
           // that first sample; duplicate pressed reports do not re-arm it.
-          if discardNextSensePanelRawXY {
-            discardNextSensePanelRawXY = false
-            continue
-          }
+          guard activeContext.shouldForwardRawXY() else { continue }
           activeContext.handler(
             .pointerDelta(Vector2(x: Double(dx), y: Double(dy)))
           )
@@ -518,6 +587,15 @@ public final class MXMaster4HIDBackend: MouseDaemonHIDBackend, @unchecked Sendab
     }
 
     cleanup(activeContext, terminalError: terminalError)
+  }
+
+  private func consumeHealthProbeRequest(for activeContext: ActiveContext) -> UInt64? {
+    lifecycle.lock()
+    defer { lifecycle.unlock() }
+    guard context === activeContext else { return nil }
+    let generation = healthProbeRequestedGeneration
+    healthProbeRequestedGeneration = nil
+    return generation
   }
 
   private func cleanup(

@@ -29,6 +29,11 @@ public struct MouseDaemonStatus: Codable, Equatable, Sendable {
 }
 
 public final class MouseDaemonCoordinator: @unchecked Sendable {
+  private enum SleepDomain {
+    case screens
+    case system
+  }
+
   public static let defaultLatchedDwell: TimeInterval =
     RingInteractionTiming.latchedSuctionDuration
 
@@ -88,13 +93,17 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   private let accessibilityTrusted: @Sendable () -> Bool
   private let frontmostApplicationProvider: any FrontmostApplicationProviding
   private let terminalDeviceFailureHandler: @Sendable (String) -> Void
+  private let wakeHealthProbeSuccessHandler: @Sendable (UInt64) -> Void
   private let latchedCompletionScheduler: any MouseDaemonLatchedCompletionScheduling
   private let latchedDwell: TimeInterval
   private let sensePanelPressDebounceInterval: TimeInterval
   private let uptimeProvider: @Sendable () -> TimeInterval
+  private let interactionLock = NSRecursiveLock()
   private let lifecycleLock = NSLock()
   private let configurationMutationLock = NSLock()
   private var running = false
+  private var screenSleeping = false
+  private var systemSleeping = false
   private var reportedTerminalDeviceFailure = false
   private var sensePanelPressed = false
   private var suppressNextSensePanelRelease = false
@@ -115,6 +124,7 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
       UnknownFrontmostApplicationProvider(),
     accessibilityTrusted: @escaping @Sendable () -> Bool = { true },
     terminalDeviceFailureHandler: @escaping @Sendable (String) -> Void = { _ in },
+    wakeHealthProbeSuccessHandler: @escaping @Sendable (UInt64) -> Void = { _ in },
     latchedCompletionScheduler: any MouseDaemonLatchedCompletionScheduling =
       DispatchLatchedCompletionScheduler(),
     latchedDwell: TimeInterval = MouseDaemonCoordinator.defaultLatchedDwell,
@@ -132,6 +142,7 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
     self.frontmostApplicationProvider = frontmostApplicationProvider
     self.accessibilityTrusted = accessibilityTrusted
     self.terminalDeviceFailureHandler = terminalDeviceFailureHandler
+    self.wakeHealthProbeSuccessHandler = wakeHealthProbeSuccessHandler
     self.latchedCompletionScheduler = latchedCompletionScheduler
     self.latchedDwell = latchedDwell
     self.sensePanelPressDebounceInterval = sensePanelPressDebounceInterval
@@ -151,6 +162,8 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
       throw MouseDaemonError.alreadyRunning
     }
     reportedTerminalDeviceFailure = false
+    screenSleeping = false
+    systemSleeping = false
     sensePanelPressed = false
     suppressNextSensePanelRelease = false
     lastAcceptedSensePanelPressUptime = nil
@@ -189,6 +202,15 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
 
   public func stop() throws {
     var firstError: (any Error)?
+    interactionLock.lock()
+    lifecycleLock.lock()
+    running = false
+    screenSleeping = false
+    systemSleeping = false
+    sensePanelPressed = false
+    suppressNextSensePanelRelease = false
+    lastAcceptedSensePanelPressUptime = nil
+    lifecycleLock.unlock()
     invalidateScheduledCompletion()
     primaryClickMonitor.setTracking(false)
     pointerMotionMonitor.setTracking(false)
@@ -197,6 +219,7 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
     } catch {
       firstError = error
     }
+    interactionLock.unlock()
     primaryClickMonitor.stop()
     pointerMotionMonitor.stop()
     do {
@@ -206,15 +229,91 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
         firstError = error
       }
     }
+    if let firstError {
+      throw firstError
+    }
+  }
+
+  /// Ends the current interaction before the display disappears. The daemon
+  /// owns this transition so cursor restoration cannot arrive late over IPC
+  /// and cancel an interaction created after wake.
+  public func prepareForSleep() {
+    prepareForSystemSleep()
+  }
+
+  public func prepareForScreenSleep() {
+    prepareForSleep(domain: .screens)
+  }
+
+  public func prepareForSystemSleep() {
+    prepareForSleep(domain: .system)
+  }
+
+  private func prepareForSleep(domain: SleepDomain) {
     lifecycleLock.lock()
-    running = false
+    let wasSleeping = sleeping
+    switch domain {
+    case .screens: screenSleeping = true
+    case .system: systemSleeping = true
+    }
+    guard !wasSleeping else {
+      lifecycleLock.unlock()
+      return
+    }
     sensePanelPressed = false
     suppressNextSensePanelRelease = false
     lastAcceptedSensePanelPressUptime = nil
     lifecycleLock.unlock()
-    if let firstError {
-      throw firstError
+    hidBackend.suspendInputForSleep()
+
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    DaemonLog.log("sleep notification received; ending the active interaction")
+    invalidateScheduledCompletion()
+    primaryClickMonitor.setTracking(false)
+    pointerMotionMonitor.setTracking(false)
+    do {
+      try cancelActiveInteraction()
+    } catch {
+      DaemonLog.log("failed to cancel the active interaction before sleep: \(error)")
     }
+  }
+
+  /// Re-enables physical input and asks the active HID session to verify its
+  /// volatile diversion immediately. Reconnect retries are handled separately
+  /// by the supervisor gate.
+  public func resumeAfterWake(generation: UInt64) {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    lifecycleLock.lock()
+    systemSleeping = false
+    // A full system wake supersedes display sleep bookkeeping from the prior
+    // power cycle. Waiting for a second notification here can permanently
+    // suppress input on clamshell, dark-wake, and changing-display paths.
+    screenSleeping = false
+    lastAcceptedSensePanelPressUptime = nil
+    lifecycleLock.unlock()
+    DaemonLog.log("wake notification received; accepting input immediately")
+    hidBackend.requestHealthProbe(generation: generation)
+  }
+
+  /// Display-only wake re-enables the input edge state immediately without a
+  /// Bluetooth/HID health probe. If the whole system is still asleep, its wake
+  /// notification owns the eventual resumption instead.
+  public func resumeAfterScreenWake() {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    lifecycleLock.lock()
+    let wasSleeping = sleeping
+    screenSleeping = false
+    let shouldResume = wasSleeping && !sleeping
+    if shouldResume {
+      lastAcceptedSensePanelPressUptime = nil
+    }
+    lifecycleLock.unlock()
+    guard shouldResume else { return }
+    DaemonLog.log("display wake notification received; accepting input immediately")
+    hidBackend.resumeInputAfterSleep()
   }
 
   /// Synchronous by design so it plugs directly into `UnixControlServer`'s
@@ -450,6 +549,9 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   private func simulationTransition(
     _ operation: @escaping @Sendable () async throws -> RingTransition
   ) throws -> RingTransition {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    guard isAcceptingInput else { throw MouseDaemonError.notRunning }
     let transition: RingTransition
     do {
       transition = try waitForActor(operation)
@@ -541,6 +643,8 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   }
 
   private func receive(_ event: MouseDaemonHIDEvent) {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
     do {
       switch event {
       case .rawReport(let packet):
@@ -595,6 +699,9 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
           transition,
           allowSystemPointerTracking: false
         )
+
+      case .wakeHealthProbeSucceeded(let generation):
+        wakeHealthProbeSuccessHandler(generation)
 
       case .terminated(let message):
         receiveTerminalDeviceFailure(message)
@@ -652,8 +759,10 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   private func updateSensePanelState(pressed: Bool) -> Bool {
     lifecycleLock.lock()
     defer { lifecycleLock.unlock() }
+    guard running else { return false }
 
     if pressed {
+      guard !sleeping else { return false }
       guard !sensePanelPressed else { return false }
       let now = uptimeProvider()
       if let lastAcceptedSensePanelPressUptime,
@@ -678,6 +787,9 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   }
 
   private func receivePrimaryClick(_ event: MouseDaemonPrimaryClickEvent) {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    guard isAcceptingInput else { return }
     do {
       switch event {
       case .primaryClick:
@@ -718,6 +830,9 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   }
 
   private func receivePointerMotion(_ event: MouseDaemonPointerMotionEvent) {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
+    guard isAcceptingInput else { return }
     do {
       switch event {
       case .pointerDelta(let delta):
@@ -764,6 +879,14 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
     return sensePanelPressed
   }
 
+  private var isAcceptingInput: Bool {
+    lifecycleLock.withLock { running && !sleeping }
+  }
+
+  private var sleeping: Bool {
+    screenSleeping || systemSleeping
+  }
+
   private func reconcilePhysicalTransition(
     _ transition: RingTransition,
     allowSystemPointerTracking: Bool
@@ -795,6 +918,8 @@ public final class MouseDaemonCoordinator: @unchecked Sendable {
   }
 
   private func completeLatchedInteraction(generation: UInt64) {
+    interactionLock.lock()
+    defer { interactionLock.unlock() }
     lifecycleLock.lock()
     guard running, scheduledCompletionGeneration == generation,
       completionGeneration == generation

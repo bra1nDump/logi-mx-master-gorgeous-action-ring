@@ -18,9 +18,6 @@ public enum OverlayTheme {
   public static let movingBubbleDiameter = CGFloat(
     RingInteractionProfile.defaultMovingBubbleRadius * 2
   )
-  /// Interaction geometry is never scaled: the visible circles must exactly
-  /// match Core's overlap calculation. Selection is communicated by tint.
-  public static let selectedTargetScale: CGFloat = 1
   /// Point size for a target's SF Symbol.
   public static let symbolPointSize: CGFloat = 21
   /// Monochrome application templates are slightly larger than SF Symbols so
@@ -46,9 +43,24 @@ public enum OverlayTheme {
 
   public static let dismissalDuration = RingInteractionTiming.overlayDismissalDuration
   public static let dismissalAnimation = Animation.easeOut(duration: dismissalDuration)
-  public static let dismissedScale: CGFloat = 0.82
 
-  /// Fans the targets out from the pointer instead of letting their first
-  /// rendered position be inferred from the hosting window's leading edge.
-  public static let presentationSpring = Animation.spring(response: 0.34, dampingFraction: 0.78)
+  /// Entry is intentionally almost immediate and changes opacity only. The
+  /// interaction geometry is full-size and in its final position from frame one.
+  public static let presentationDuration: TimeInterval = 0.06
+  public static let presentationAnimation = Animation.easeOut(duration: presentationDuration)
+
+  /// Selection lighting ramps with Core's approach progress: the nearer the
+  /// moving bubble gets to its target, the stronger the tint. The target and
+  /// the moving bubble share this ramp, so both light up at the same speed.
+  /// `selectionTint(0)` is exactly the resting `violet` tint at 0.30 opacity.
+  public static func selectionTint(progress: Double) -> Color {
+    let clamped = min(max(progress, 0), 1)
+    func lerp(_ a: Double, _ b: Double) -> Double { a + ((b - a) * clamped) }
+    return Color(
+      red: lerp(0x8b, 0xa8) / 255,
+      green: lerp(0x7c, 0x9b) / 255,
+      blue: lerp(0xf7, 0xff) / 255
+    )
+    .opacity(lerp(0.30, 0.55))
+  }
 }

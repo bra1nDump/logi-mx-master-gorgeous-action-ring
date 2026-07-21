@@ -9,6 +9,149 @@ private enum CoordinatorTestError: Error {
 }
 
 final class MouseDaemonCoordinatorTests: XCTestCase {
+  func testSleepCancelsInteractionAndWakeImmediatelyReenablesInput() throws {
+    var configuration = MouseConfiguration()
+    try configuration.putAction(
+      named: "terminal",
+      action: .application(ApplicationAction(bundleID: "com.apple.Terminal"))
+    )
+    let fixture = makeTestCoordinator(configuration: configuration)
+    try fixture.coordinator.start()
+    defer { try? fixture.coordinator.stop() }
+
+    fixture.backend.emit(.sensePanelPressed)
+    var status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .invoked)
+    XCTAssertEqual(fixture.visibility.intents, [.hide])
+
+    fixture.coordinator.prepareForSleep()
+    XCTAssertEqual(fixture.backend.sleepSuspensionCount, 1)
+    status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .cancelled)
+    XCTAssertEqual(fixture.visibility.intents, [.hide, .restore])
+    XCTAssertFalse(fixture.primaryClickMonitor.tracking)
+    XCTAssertFalse(fixture.pointerMotionMonitor.tracking)
+
+    fixture.backend.emit(.sensePanelPressed)
+    status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .cancelled, "physical input must stay blocked during sleep")
+
+    fixture.coordinator.resumeAfterWake(generation: 1)
+    XCTAssertEqual(fixture.backend.healthProbeRequestCount, 1)
+    fixture.backend.emit(.sensePanelPressed)
+    status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .invoked)
+    XCTAssertEqual(fixture.visibility.intents, [.hide, .restore, .hide])
+  }
+
+  func testDisplayOnlyWakeResumesInputWithoutHIDHealthProbe() throws {
+    var configuration = MouseConfiguration()
+    try configuration.putAction(
+      named: "terminal",
+      action: .application(ApplicationAction(bundleID: "com.apple.Terminal"))
+    )
+    let fixture = makeTestCoordinator(configuration: configuration)
+    try fixture.coordinator.start()
+    defer { try? fixture.coordinator.stop() }
+
+    fixture.coordinator.prepareForScreenSleep()
+    fixture.coordinator.resumeAfterScreenWake()
+
+    XCTAssertEqual(fixture.backend.sleepSuspensionCount, 1)
+    XCTAssertEqual(fixture.backend.sleepResumptionCount, 1)
+    XCTAssertEqual(fixture.backend.healthProbeRequestCount, 0)
+    fixture.backend.emit(.sensePanelPressed)
+    let status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .invoked)
+  }
+
+  func testSystemWakeSupersedesPriorScreenSleepWithoutWaitingForScreenWake() throws {
+    var configuration = MouseConfiguration()
+    try configuration.putAction(
+      named: "terminal",
+      action: .application(ApplicationAction(bundleID: "com.apple.Terminal"))
+    )
+    let fixture = makeTestCoordinator(configuration: configuration)
+    try fixture.coordinator.start()
+    defer { try? fixture.coordinator.stop() }
+
+    fixture.coordinator.prepareForScreenSleep()
+    fixture.coordinator.prepareForSystemSleep()
+    fixture.coordinator.resumeAfterWake(generation: 7)
+
+    XCTAssertEqual(fixture.backend.sleepSuspensionCount, 1)
+    XCTAssertEqual(fixture.backend.sleepResumptionCount, 0)
+    XCTAssertEqual(fixture.backend.healthProbeRequestCount, 1)
+    fixture.backend.emit(.sensePanelPressed)
+    let status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .invoked)
+  }
+
+  func testSleepCannotBeEscapedByAnInvocationAlreadyInFlight() throws {
+    var configuration = MouseConfiguration()
+    try configuration.putAction(
+      named: "terminal",
+      action: .application(ApplicationAction(bundleID: "com.apple.Terminal"))
+    )
+    let cursor = BlockingCursorProvider()
+    let fixture = makeTestCoordinator(
+      configuration: configuration,
+      cursorPositionProvider: cursor
+    )
+    try fixture.coordinator.start()
+    defer { try? fixture.coordinator.stop() }
+
+    let pressFinished = expectation(description: "in-flight press finished")
+    Thread.detachNewThread {
+      fixture.backend.emit(.sensePanelPressed)
+      pressFinished.fulfill()
+    }
+    XCTAssertTrue(cursor.waitUntilRequested(), "the press must reach runtime invocation")
+
+    let sleepFinished = expectation(description: "sleep cleanup finished")
+    Thread.detachNewThread {
+      fixture.coordinator.prepareForSleep()
+      sleepFinished.fulfill()
+    }
+    let suspensionDeadline = Date().addingTimeInterval(2)
+    while fixture.backend.sleepSuspensionCount == 0, Date() < suspensionDeadline {
+      Thread.sleep(forTimeInterval: 0.001)
+    }
+    XCTAssertEqual(
+      fixture.backend.sleepSuspensionCount,
+      1,
+      "sleep must suspend new backend input before waiting for the in-flight press"
+    )
+
+    cursor.release()
+    wait(for: [pressFinished, sleepFinished], timeout: 2)
+
+    let status = try MouseDaemonJSON.decode(
+      MouseDaemonStatus.self,
+      from: fixture.coordinator.handle(ControlRequest(method: .status))
+    )
+    XCTAssertEqual(status.phase, .cancelled)
+    XCTAssertEqual(fixture.visibility.intents, [.hide, .restore])
+  }
+
   func testActionCRUDUsesStableNamesAndPreservesExplicitOrder() throws {
     let fixture = makeTestCoordinator()
     try fixture.coordinator.start()

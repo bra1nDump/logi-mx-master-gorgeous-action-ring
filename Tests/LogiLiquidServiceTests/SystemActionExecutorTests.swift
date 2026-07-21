@@ -116,7 +116,7 @@ final class SystemActionExecutorTests: XCTestCase {
     _ = executor.isAccessibilityTrusted
   }
 
-  func testAquaVoiceDoubleFnUsesKeyCode63AndConfiguredDelay() throws {
+  func testAquaVoiceDoubleRightOptionUsesKeyCode61AndConfiguredDelay() throws {
     let system = RecordingActionSystem()
     let executor = SystemActionExecutor(system: system)
 
@@ -125,7 +125,7 @@ final class SystemActionExecutorTests: XCTestCase {
         name: "Aqua Voice",
         action: .shortcut(
           ShortcutAction(
-            key: "fn",
+            key: "rightoption",
             repeatCount: 2,
             interTapDelayMilliseconds: 75
           )
@@ -133,9 +133,49 @@ final class SystemActionExecutorTests: XCTestCase {
       )
     )
 
-    XCTAssertEqual(system.keyStrokes.map(\.keyCode), [63, 63])
+    XCTAssertEqual(system.keyStrokes.map(\.keyCode), [61, 61])
     XCTAssertEqual(system.keyStrokes.map(\.flags), [0, 0])
     XCTAssertEqual(system.waits, [75])
+  }
+
+  func testControlUpShortcutUsesExpectedKeyCodeAndFlags() throws {
+    let system = RecordingActionSystem()
+    let executor = SystemActionExecutor(system: system)
+
+    try executor.execute(
+      ActionInvocation(
+        name: "Control Up",
+        action: .shortcut(ShortcutAction(key: "up", modifiers: [.control]))
+      )
+    )
+
+    XCTAssertEqual(system.keyStrokes.map(\.keyCode), [126])
+    XCTAssertEqual(system.keyStrokes.map(\.flags), [CGEventFlags.maskControl.rawValue])
+  }
+
+  func testModifierKeyTapSetsThenClearsItsOwnFlag() {
+    XCTAssertEqual(
+      MacOSActionExecutorSystem.flagsByApplying(keyCode: 58, pressed: true, to: []),
+      .maskAlternate
+    )
+    XCTAssertEqual(
+      MacOSActionExecutorSystem.flagsByApplying(keyCode: 58, pressed: false, to: .maskAlternate),
+      []
+    )
+    // An explicit modifier in the shortcut stays held across the tap.
+    XCTAssertEqual(
+      MacOSActionExecutorSystem.flagsByApplying(
+        keyCode: 61,
+        pressed: false,
+        to: [.maskAlternate, .maskShift]
+      ),
+      .maskShift
+    )
+    // Non-modifier keys pass flags through untouched.
+    XCTAssertEqual(
+      MacOSActionExecutorSystem.flagsByApplying(keyCode: 49, pressed: true, to: .maskAlternate),
+      .maskAlternate
+    )
   }
 
   func testRepeatedShortcutUsesShortDefaultDelay() throws {

@@ -102,7 +102,8 @@ public enum ProductionMouseDaemonFactory {
     journalURL: URL? = nil,
     socketURL: URL = LogiLiquidControlProtocol.defaultSocketURL,
     selectedRegistryID: UInt64? = nil,
-    terminalDeviceFailureHandler: @escaping @Sendable (String) -> Void = { _ in }
+    terminalDeviceFailureHandler: @escaping @Sendable (String) -> Void = { _ in },
+    wakeHealthProbeSuccessHandler: @escaping @Sendable (UInt64) -> Void = { _ in }
   ) throws -> MouseDaemonControlHost {
     let repository = try PrivateMouseConfigurationRepository(
       url: configurationURL,
@@ -143,7 +144,8 @@ public enum ProductionMouseDaemonFactory {
       eventHub: events,
       frontmostApplicationProvider: frontmostApplication,
       accessibilityTrusted: { actionExecutor.isAccessibilityTrusted },
-      terminalDeviceFailureHandler: terminalDeviceFailureHandler
+      terminalDeviceFailureHandler: terminalDeviceFailureHandler,
+      wakeHealthProbeSuccessHandler: wakeHealthProbeSuccessHandler
     )
     return MouseDaemonControlHost(
       coordinator: coordinator,

@@ -87,23 +87,24 @@ exists. Existing configuration is never overwritten.
 
 | Zone | Role | Default actions |
 | --- | --- | --- |
-| Top | Entertainment | `Play Spotify` |
-| Right | Common applications | `Telegram`, `ChatGPT Quick Chat` |
-| Bottom | Frontmost-application actions | Empty placeholder |
-| Left | Utilities | `Aqua Voice`, `CleanShot Capture`, `CleanShot Record` |
+| Top | — | Empty |
+| Right | Common applications | `Telegram`, `Twitter`, `ChatGPT Quick Chat` |
+| Bottom | Window management | `Mission Control` |
+| Left | Capture and voice | `CleanShot Record`, `CleanShot Capture`, `Aqua Voice` |
 
 The action implementations are exact:
 
-- `Play Spotify` launches Spotify when necessary and sends its native Play
-  Apple Event.
 - `Telegram` opens bundle ID `ru.keepcoder.Telegram`.
+- `Twitter` opens `https://x.com/` with the default handler.
 - `ChatGPT Quick Chat` sends Option-Space.
-- `Aqua Voice` sends two Fn presses, 80 ms apart, for hands-free recording.
+- `Aqua Voice` sends two right-Option presses, 80 ms apart, for hands-free recording.
 - `CleanShot Capture` opens `cleanshot://capture-area`.
 - `CleanShot Record` opens `cleanshot://record-screen`.
+- `Mission Control` opens Apple's bundled Mission Control application by its
+  `com.apple.exposelauncher` bundle ID, independent of the user's keyboard-shortcut settings.
 
 Only populated actions become targets. The bottom zone remains present in the
-resolved model when empty, but has no selectable action until the frontmost app
+resolved model when empty, but has no selectable action until an application
 has one configured.
 
 The ChatGPT target uses the package's bundled monochrome OpenAI/ChatGPT mark so

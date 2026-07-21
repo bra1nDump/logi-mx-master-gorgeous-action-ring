@@ -161,6 +161,7 @@ public enum MouseDaemonHIDEvent: Sendable {
   case sensePanelPressed
   case sensePanelReleased
   case pointerDelta(Vector2)
+  case wakeHealthProbeSucceeded(generation: UInt64)
   case terminated(message: String)
 }
 
@@ -255,6 +256,9 @@ public protocol MouseDaemonHIDBackend: MouseHIDControlling {
   ) throws
   func stop() throws
   func inspect() throws -> MouseDeviceInspection
+  func suspendInputForSleep()
+  func resumeInputAfterSleep()
+  func requestHealthProbe(generation: UInt64)
 }
 
 public enum MouseDaemonError: Error, Equatable, Sendable {

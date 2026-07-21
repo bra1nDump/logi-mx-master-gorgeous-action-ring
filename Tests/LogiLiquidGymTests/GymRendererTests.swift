@@ -13,7 +13,7 @@ final class GymRendererTests: XCTestCase {
     scale: 1
   )
 
-  func testDemoTimelineCoversDesktopBuzzInvocationMovementSuctionCommitAndDismiss() throws {
+  func testDemoTimelineCoversTeaseDismissRebloomCommitAndRecording() throws {
     let configuration = GymDemoConfiguration(
       pixelWidth: 900,
       pixelHeight: 600,
@@ -22,50 +22,70 @@ final class GymRendererTests: XCTestCase {
     let timeline = try GymDemoTimeline(configuration: configuration)
     let frames = (0..<configuration.frameCount).map(timeline.frame(at:))
 
-    XCTAssertEqual(configuration.frameCount, 84)
+    XCTAssertEqual(configuration.frameCount, 225)
     XCTAssertEqual(Set(frames.map(\.phase)), Set(GymDemoPhase.allCases))
 
-    // The video opens and closes on a plain desktop with the pointer visible,
-    // so it loops cleanly.
+    // The first frame already shows the bloomed ring, so the result is
+    // visible immediately.
     let first = try XCTUnwrap(frames.first)
-    XCTAssertEqual(first.phase, .desktop)
-    XCTAssertTrue(first.cursorVisible)
-    XCTAssertEqual(first.overallOpacity, 0)
+    XCTAssertEqual(first.phase, .bloom)
+    XCTAssertFalse(first.cursorVisible)
+    XCTAssertEqual(first.overallOpacity, 1)
+    XCTAssertEqual(first.presentationProgress, 1)
+
+    // The video ends on the recording HUD with the cursor back on the desktop.
     let last = try XCTUnwrap(frames.last)
-    XCTAssertEqual(last.phase, .desktop)
+    XCTAssertEqual(last.phase, .recording)
     XCTAssertTrue(last.cursorVisible)
-    XCTAssertEqual(last.overallOpacity, 0)
+    XCTAssertEqual(last.recordingProgress, 1)
 
-    // The buzz shakes the still-visible pointer before the ring exists.
-    let buzzFrames = frames.filter { $0.phase == .buzz }
+    // Every buzz surfaces at its real moment: the toggle-close press, the
+    // reopen press, and the haptic fired when the action latches.
+    let buzzFrames = frames.filter { $0.buzzProgress > 0 }
     XCTAssertFalse(buzzFrames.isEmpty)
-    XCTAssertTrue(buzzFrames.allSatisfy(\.cursorVisible))
-    XCTAssertTrue(buzzFrames.allSatisfy { $0.overallOpacity == 0 })
-    XCTAssertTrue(buzzFrames.contains { $0.cursorShakeOffset != .zero })
-    XCTAssertTrue(buzzFrames.contains { $0.buzzProgress > 0.5 })
+    XCTAssertTrue(buzzFrames.contains { $0.phase == .dismissing })
+    XCTAssertTrue(buzzFrames.contains { $0.phase == .rebloom })
+    XCTAssertTrue(buzzFrames.contains { $0.phase == .suction })
 
-    // The pointer hides while the ring is active and returns for dismissal,
-    // matching the product's cursor hide/restore.
+    // Act 1 never latches: the tease stops at a partial approach with no
+    // metaball merge, then the ring dismisses and the cursor returns.
+    let tease = try XCTUnwrap(frames.last { $0.phase == .tease })
+    XCTAssertEqual(tease.activeTargetID, timeline.teaseTargetID)
+    XCTAssertGreaterThan(tease.approachProgress, 0.1)
+    XCTAssertLessThan(tease.approachProgress, 0.4)
+    XCTAssertEqual(tease.mergeProgress, 0)
+    let dwellFrames = frames.filter { $0.phase == .dwell }
+    XCTAssertFalse(dwellFrames.isEmpty)
+    XCTAssertTrue(dwellFrames.allSatisfy { $0.activeTargetID == timeline.teaseTargetID })
+    let firstDismissing = try XCTUnwrap(frames.first { $0.phase == .dismissing })
+    XCTAssertTrue(firstDismissing.cursorVisible)
+    let desktop = try XCTUnwrap(frames.first { $0.phase == .desktop })
+    XCTAssertTrue(desktop.cursorVisible)
+    XCTAssertEqual(desktop.overallOpacity, 0)
+
+    // The pointer hides while the ring is active in act 2 and returns after
+    // the commit, matching the product's cursor hide/restore.
     let ringFrames = frames.filter {
-      [.invocation, .travel, .suction, .committed].contains($0.phase)
+      [.rebloom, .travel, .suction, .committed].contains($0.phase)
     }
     XCTAssertTrue(ringFrames.allSatisfy { !$0.cursorVisible })
-    let dismissing = try XCTUnwrap(frames.first { $0.phase == .dismissing })
-    XCTAssertTrue(dismissing.cursorVisible)
 
     let travel = try XCTUnwrap(frames.last { $0.phase == .travel })
     let suction = try XCTUnwrap(frames.last { $0.phase == .suction })
     let committed = try XCTUnwrap(frames.first { $0.phase == .committed })
+    XCTAssertEqual(travel.activeTargetID, timeline.commitTargetID)
     XCTAssertNotEqual(travel.bubbleOffset, .zero)
     XCTAssertGreaterThan(travel.mergeProgress, 0)
     XCTAssertGreaterThan(suction.mergeProgress, travel.mergeProgress)
-    XCTAssertEqual(committed.bubbleOffset, timeline.selectedTargetOffset)
+    XCTAssertEqual(committed.bubbleOffset, timeline.commitTargetOffset)
     XCTAssertEqual(committed.mergeProgress, 1)
+    XCTAssertEqual(committed.approachProgress, 1)
 
+    // The travel endpoint is exactly Core's overlap latch boundary.
     let profile = RingInteractionProfile.default
     let thresholdDistance = hypot(
-      timeline.latchThresholdOffset.x - timeline.selectedTargetOffset.x,
-      timeline.latchThresholdOffset.y - timeline.selectedTargetOffset.y
+      timeline.latchThresholdOffset.x - timeline.commitTargetOffset.x,
+      timeline.latchThresholdOffset.y - timeline.commitTargetOffset.y
     )
     XCTAssertEqual(
       CircleIntersectionGeometry.overlapFractionOfCircleA(
@@ -113,8 +133,8 @@ final class GymRendererTests: XCTestCase {
     let artifact = try await GymDemoRenderer.inspect(videoURL)
     XCTAssertEqual(artifact.pixelWidth, 320)
     XCTAssertEqual(artifact.pixelHeight, 320)
-    XCTAssertEqual(artifact.frameCount, 42)
-    XCTAssertEqual(artifact.duration, 2.8, accuracy: 0.05)
+    XCTAssertEqual(artifact.frameCount, 113)
+    XCTAssertEqual(artifact.duration, 7.5, accuracy: 0.05)
     XCTAssertTrue(artifact.isH264)
     XCTAssertTrue(artifact.hasOpaqueBackground)
     XCTAssertGreaterThan(artifact.byteCount, 10_000)
@@ -140,8 +160,15 @@ final class GymRendererTests: XCTestCase {
     XCTAssertNil(invoked.transition.frame.currentTarget)
     XCTAssertEqual(targeting.transition.frame.phase, .tracking)
     XCTAssertEqual(targeting.transition.frame.mergeProgress, 0.25, accuracy: 0.000_001)
+    XCTAssertEqual(
+      targeting.transition.frame.approachProgress,
+      1 - (0.75 * RingInteractionProfile.default.mergeStartDistance)
+        / RingInteractionProfile.default.ringRadius,
+      accuracy: 0.000_001
+    )
     XCTAssertEqual(latched.transition.frame.phase, .latched)
     XCTAssertEqual(latched.transition.frame.mergeProgress, 1, accuracy: 0.000_001)
+    XCTAssertEqual(latched.transition.frame.approachProgress, 1, accuracy: 0.000_001)
     let latchedTarget = try XCTUnwrap(latched.transition.frame.currentTarget)
     let centerDistance = latched.transition.frame.accumulatedPointerDelta.distance(
       to: latchedTarget.vectorFromOrigin
@@ -155,7 +182,7 @@ final class GymRendererTests: XCTestCase {
       RingInteractionThresholds.latchOverlapFraction,
       accuracy: 0.000_001
     )
-    XCTAssertEqual(latched.transition.actionToPerform?.name, "Play Spotify")
+    XCTAssertEqual(latched.transition.actionToPerform?.name, "Mission Control")
     XCTAssertEqual(latched.transition.hapticIntent, .play(waveformID: 0))
     XCTAssertEqual(committed.transition.frame.phase, .committed)
     XCTAssertEqual(committed.transition.frame.mergeProgress, 1, accuracy: 0.000_001)

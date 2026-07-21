@@ -72,10 +72,30 @@ struct MacOSActionExecutorSystem: SystemActionExecutorSystem {
       throw SystemActionExecutorError.keyboardEventCreationFailed
     }
 
-    keyDown.flags = flags
-    keyUp.flags = flags
+    keyDown.flags = Self.flagsByApplying(keyCode: keyCode, pressed: true, to: flags)
+    keyUp.flags = Self.flagsByApplying(keyCode: keyCode, pressed: false, to: flags)
     keyDown.post(tap: .cghidEventTap)
     keyUp.post(tap: .cghidEventTap)
+  }
+
+  /// A modifier used as the shortcut key must read like a hardware tap: the
+  /// down event sets the modifier's own flag and the up event clears it, so
+  /// double-tap modifiers (for example voice triggers) are recognized.
+  static func flagsByApplying(
+    keyCode: CGKeyCode,
+    pressed: Bool,
+    to flags: CGEventFlags
+  ) -> CGEventFlags {
+    let ownFlag: CGEventFlags
+    switch keyCode {
+    case 54, 55: ownFlag = .maskCommand
+    case 56, 60: ownFlag = .maskShift
+    case 58, 61: ownFlag = .maskAlternate
+    case 59, 62: ownFlag = .maskControl
+    case 63: ownFlag = .maskSecondaryFn
+    default: return flags
+    }
+    return pressed ? flags.union(ownFlag) : flags.subtracting(ownFlag)
   }
 
   func wait(milliseconds: Int) {
@@ -470,6 +490,7 @@ public struct SystemActionExecutor: ActionExecuting, Sendable {
     "comma": 43, "/": 44, "slash": 44, "n": 45, "m": 46, ".": 47,
     "period": 47, "tab": 48, "space": 49, "`": 50, "grave": 50,
     "delete": 51, "backspace": 51, "escape": 53, "esc": 53,
+    "option": 58, "alt": 58, "rightoption": 61, "rightalt": 61,
     "fn": 63, "function": 63, "f17": 64,
     "decimal": 65, "multiply": 67, "plus": 69, "clear": 71, "divide": 75,
     "enterkeypad": 76, "subtract": 78, "f18": 79, "f19": 80, "f20": 90,

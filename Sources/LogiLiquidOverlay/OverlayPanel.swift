@@ -1,4 +1,5 @@
 import AppKit
+import CoreGraphics
 
 /// A borderless, transparent, non-activating panel that hosts the overlay.
 ///
@@ -22,11 +23,16 @@ final class OverlayPanel: NSPanel {
     isOpaque = false
     backgroundColor = .clear
     hasShadow = false
-    level = .statusBar
+    isFloatingPanel = true
+    worksWhenModal = true
+    // Above everything, including full-screen spaces and the menu bar: the
+    // ring must present wherever the pointer is. `.statusBar` is too low —
+    // another app's full-screen space can cover it.
+    level = .screenSaver
     hidesOnDeactivate = false
     isMovableByWindowBackground = false
     ignoresMouseEvents = false
-    collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .stationary]
+    collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .ignoresCycle, .transient]
     contentView.autoresizingMask = [.width, .height]
     self.contentView = contentView
   }
@@ -50,6 +56,33 @@ final class OverlayPanel: NSPanel {
     makeKey()
   }
 
+  /// Whether WindowServer has actually composited this panel on the current
+  /// Space. `isVisible` alone is insufficient: after sleep or a display/Space
+  /// reconfiguration AppKit can report a window as visible while WindowServer
+  /// keeps it detached from every active Space.
+  var isOnScreenInWindowServer: Bool? {
+    let number = windowNumber
+    guard number > 0,
+      let windows = CGWindowListCopyWindowInfo(
+        .optionIncludingWindow,
+        CGWindowID(number)
+      ) as? [[String: Any]],
+      let window = windows.first(where: {
+        ($0[kCGWindowNumber as String] as? Int) == number
+      })
+    else {
+      return nil
+    }
+    return window[kCGWindowIsOnscreen as String] as? Bool
+  }
+
+  var presentationDiagnostics: String {
+    let windowServerState = isOnScreenInWindowServer.map(String.init) ?? "unknown"
+    return "window=\(windowNumber) visible=\(isVisible) activeSpace=\(isOnActiveSpace) "
+      + "occlusionVisible=\(occlusionState.contains(.visible)) "
+      + "windowServerOnScreen=\(windowServerState)"
+  }
+
   /// Orders the panel out and yields key focus back to the previous window.
   func dismissOverlay(after duration: TimeInterval) {
     pendingDismissal?.cancel()
@@ -60,5 +93,16 @@ final class OverlayPanel: NSPanel {
     }
     pendingDismissal = dismissal
     DispatchQueue.main.asyncAfter(deadline: .now() + max(duration, 0), execute: dismissal)
+  }
+
+  /// Permanently retires this panel. Panels are deliberately single-use: a
+  /// fresh native window gets a fresh WindowServer/Space association for every
+  /// ring invocation.
+  func retire() {
+    pendingDismissal?.cancel()
+    pendingDismissal = nil
+    orderOut(nil)
+    contentView = nil
+    close()
   }
 }

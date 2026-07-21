@@ -59,6 +59,9 @@ let package = Package(
         "LogiLiquidCore",
         "LogiLiquidHID",
         "LogiLiquidService",
+      ],
+      linkerSettings: [
+        .linkedFramework("AppKit")
       ]
     ),
     .executableTarget(
@@ -145,6 +148,10 @@ let package = Package(
     .testTarget(
       name: "LogiLiquidGymTests",
       dependencies: ["LogiLiquidGym", "LogiLiquidCore", "LogiLiquidUI"]
+    ),
+    .testTarget(
+      name: "LogiLiquidOverlayTests",
+      dependencies: ["LogiLiquidOverlay"]
     ),
   ],
   swiftLanguageModes: [.v6]

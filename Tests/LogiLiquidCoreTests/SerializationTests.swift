@@ -147,10 +147,12 @@ final class SerializationTests: XCTestCase {
     )
     XCTAssertEqual(application["bundleID"] as? String, "com.apple.finder")
     let targets = try XCTUnwrap(frame["targetVectors"] as? [[String: Any]])
-    XCTAssertEqual(targets.first?["zone"] as? String, "top")
+    XCTAssertEqual(targets.first?["zone"] as? String, "right")
     let zoneLayouts = try XCTUnwrap(frame["zoneLayouts"] as? [[String: Any]])
+    let top = try XCTUnwrap(zoneLayouts.first { $0["zone"] as? String == "top" })
+    XCTAssertEqual(top["actionNames"] as? [String], [])
     let bottom = try XCTUnwrap(zoneLayouts.first { $0["zone"] as? String == "bottom" })
-    XCTAssertEqual(bottom["isPlaceholder"] as? Bool, true)
+    XCTAssertEqual(bottom["isPlaceholder"] as? Bool, false)
 
     XCTAssertEqual(
       try JSONDecoder().decode(RingTransition.self, from: Data(line.utf8)),

@@ -1,3 +1,4 @@
+import AppKit
 import Darwin
 import Dispatch
 import Foundation
@@ -7,20 +8,95 @@ import LogiLiquidDaemon
 @main
 enum LogiLiquidDaemonMain {
   static func main() {
+    Darwin.signal(SIGINT, SIG_IGN)
+    Darwin.signal(SIGTERM, SIG_IGN)
     do {
       let options = try DaemonLaunchOptions.parse(
         Array(CommandLine.arguments.dropFirst())
       )
       let gate = DaemonSupervisorGate()
+      let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
+      let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
+      interrupt.setEventHandler { gate.signalShutdown() }
+      terminate.setEventHandler { gate.signalShutdown() }
+      interrupt.resume()
+      terminate.resume()
+      defer {
+        interrupt.cancel()
+        terminate.cancel()
+      }
       let host = try ProductionMouseDaemonFactory.make(
         configurationURL: options.configurationURL,
         socketURL: options.socketURL,
         selectedRegistryID: options.selectedRegistryID,
         terminalDeviceFailureHandler: { message in
           gate.signalDeviceFailure(message)
+        },
+        wakeHealthProbeSuccessHandler: { generation in
+          gate.clearWakeRetry(generation: generation)
         }
       )
-      try superviseUntilShutdown(host, gate: gate)
+      let powerMonitor = SystemPowerMonitor(
+        onScreenSleep: { host.coordinator.prepareForScreenSleep() },
+        onSystemSleep: { host.coordinator.prepareForSystemSleep() },
+        onScreenWake: { host.coordinator.resumeAfterScreenWake() },
+        onSystemWake: {
+          let generation = gate.signalWake()
+          host.coordinator.resumeAfterWake(generation: generation)
+        }
+      )
+      let application = NSApplication.shared
+      let processInfo = ProcessInfo.processInfo
+      processInfo.disableAutomaticTermination("CommandBloom daemon device service")
+      processInfo.disableSuddenTermination()
+      // Accessory gives NSWorkspace its documented AppKit event lifecycle while
+      // keeping this LaunchAgent out of the Dock, menu bar, and activation flow.
+      application.setActivationPolicy(.accessory)
+      let applicationDelegate = DaemonApplicationDelegate(gate: gate)
+      application.delegate = applicationDelegate
+      application.finishLaunching()
+      guard powerMonitor.start() else {
+        throw MouseDaemonError.restorationFailed(
+          "The macOS sleep/wake monitor did not start."
+        )
+      }
+
+      let outcome = DaemonSupervisionOutcome()
+      let supervisor = Thread {
+        do {
+          try superviseUntilShutdown(host, gate: gate)
+          outcome.finish(with: .success(()))
+        } catch {
+          outcome.finish(with: .failure(error))
+        }
+        DispatchQueue.main.async {
+          if !powerMonitor.stop() {
+            DaemonLog.log("sleep/wake monitor shutdown exceeded its lifecycle deadline")
+          }
+          do {
+            try outcome.get()
+            Darwin.exit(0)
+          } catch {
+            DaemonLog.log(error.localizedDescription)
+            Darwin.exit(1)
+          }
+        }
+      }
+      supervisor.name = "com.logiliquid.controls.daemon.supervisor"
+      supervisor.start()
+      withExtendedLifetime(applicationDelegate) {
+        application.run()
+      }
+      gate.signalShutdown()
+      if !powerMonitor.stop() {
+        DaemonLog.log("sleep/wake monitor shutdown exceeded its lifecycle deadline")
+      }
+      if !outcome.wait(timeout: SystemPowerMonitor.defaultLifecycleTimeout) {
+        DaemonLog.log("daemon restoration exceeded its lifecycle deadline")
+      }
+      throw MouseDaemonError.restorationFailed(
+        "The daemon application event loop ended unexpectedly."
+      )
     } catch {
       DaemonLog.log(error.localizedDescription)
       Darwin.exit(1)
@@ -37,29 +113,15 @@ enum LogiLiquidDaemonMain {
     _ host: MouseDaemonControlHost,
     gate: DaemonSupervisorGate
   ) throws {
-    Darwin.signal(SIGINT, SIG_IGN)
-    Darwin.signal(SIGTERM, SIG_IGN)
-
-    let interrupt = DispatchSource.makeSignalSource(signal: SIGINT, queue: .global())
-    let terminate = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .global())
-    interrupt.setEventHandler { gate.signalShutdown() }
-    terminate.setEventHandler { gate.signalShutdown() }
-    interrupt.resume()
-    terminate.resume()
-    defer {
-      interrupt.cancel()
-      terminate.cancel()
-    }
-
     try host.server.start()
     defer { host.server.stop() }
-
     var backoff = DaemonRetryBackoff()
     var lastLoggedFailure: String?
     var announcedActive = false
 
     supervision: while true {
       do {
+        gate.reset()
         try host.coordinator.start()
       } catch let error as MouseDaemonError where error.preventsAutomaticDeviceRecovery {
         throw error
@@ -71,8 +133,14 @@ enum LogiLiquidDaemonMain {
           DaemonLog.log("waiting for the MX Master 4: \(message)")
         }
         gate.reset()
-        if gate.wait(timeout: backoff.next()) == .signal {
+        let retryEvent = gate.wait(timeout: backoff.next())
+        if retryEvent == .signal {
           break supervision
+        }
+        if case .wake = retryEvent {
+          backoff.reset()
+          _ = gate.consumeWakeRetry()
+          DaemonLog.log("system wake detected; retrying the MX Master 4 immediately")
         }
         continue
       }
@@ -84,7 +152,12 @@ enum LogiLiquidDaemonMain {
       }
       backoff.reset()
 
-      let event = gate.wait()
+      var event = gate.wait()
+      while case .wake = event {
+        backoff.reset()
+        DaemonLog.log("system wake detected; active HID session remains connected")
+        event = gate.wait()
+      }
       // `stop()` waits for the HID backend's event loop to restore the exact
       // pre-diversion state (when the device is still reachable) before the
       // session is considered over.
@@ -104,13 +177,71 @@ enum LogiLiquidDaemonMain {
         DaemonLog.log("device session ended: \(message); reconnecting")
         lastLoggedFailure = message
         gate.reset()
-        if gate.wait(timeout: backoff.next()) == .signal {
+        let retryEvent = gate.wait(
+          timeout: backoff.next(afterWake: gate.consumeWakeRetry())
+        )
+        if retryEvent == .signal {
           break supervision
         }
+        if case .wake = retryEvent {
+          backoff.reset()
+          _ = gate.consumeWakeRetry()
+          DaemonLog.log("system wake detected; retrying the MX Master 4 immediately")
+        }
+      case .wake:
+        // Consumed by the loop above so a healthy session is never restarted.
+        break
       case .timeout:
         break
       }
     }
+  }
+}
+
+private final class DaemonApplicationDelegate: NSObject, NSApplicationDelegate {
+  private let gate: DaemonSupervisorGate
+
+  init(gate: DaemonSupervisorGate) {
+    self.gate = gate
+  }
+
+  func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+    gate.signalShutdown()
+    return .terminateLater
+  }
+}
+
+private final class DaemonSupervisionOutcome: @unchecked Sendable {
+  private let condition = NSCondition()
+  private var result: Result<Void, any Error>?
+
+  func finish(with result: Result<Void, any Error>) {
+    condition.lock()
+    self.result = result
+    condition.broadcast()
+    condition.unlock()
+  }
+
+  func get() throws {
+    condition.lock()
+    let result = result
+    condition.unlock()
+    guard let result else {
+      throw MouseDaemonError.restorationFailed(
+        "The daemon application loop ended before supervision completed."
+      )
+    }
+    try result.get()
+  }
+
+  func wait(timeout: TimeInterval) -> Bool {
+    let deadline = Date().addingTimeInterval(max(timeout, 0))
+    condition.lock()
+    defer { condition.unlock() }
+    while result == nil {
+      guard condition.wait(until: deadline) else { return false }
+    }
+    return true
   }
 }
 

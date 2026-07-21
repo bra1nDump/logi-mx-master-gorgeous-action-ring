@@ -8,10 +8,12 @@ final class OverlayTargetPresentationTests: XCTestCase {
     let expectations: [String: String] = [
       "Play Spotify": "play.fill",
       "Telegram": "paperplane.fill",
+      "Twitter": "bird.fill",
       "ChatGPT Quick Chat": "text.bubble.fill",
-      "Aqua Voice": "mic.fill",
+      "Aqua Voice": "waveform",
       "CleanShot Capture": "camera.viewfinder",
       "CleanShot Record": "record.circle",
+      "Mission Control": "rectangle.3.group",
     ]
     for (name, symbol) in expectations {
       let presentation = OverlayTargetSymbols.presentation(forActionNamed: name)
@@ -46,6 +48,30 @@ final class OverlayTargetPresentationTests: XCTestCase {
       )
     )
     XCTAssertEqual(presentation.symbolName, "text.bubble.fill")
+  }
+
+  func testTwitterUsesBundledBirdMarkWithDeterministicFallback() {
+    let presentation = OverlayTargetSymbols.presentation(forActionNamed: "Twitter")
+    XCTAssertEqual(
+      presentation.icon,
+      .bundledTemplate(
+        resourceName: "TwitterBirdMark",
+        fallbackSymbol: "bird.fill"
+      )
+    )
+    XCTAssertEqual(presentation.symbolName, "bird.fill")
+  }
+
+  func testAquaVoiceUsesBundledStaticBarsWithDeterministicFallback() {
+    let presentation = OverlayTargetSymbols.presentation(forActionNamed: "Aqua Voice")
+    XCTAssertEqual(
+      presentation.icon,
+      .bundledTemplate(
+        resourceName: "AquaVoiceBarsMark",
+        fallbackSymbol: "waveform"
+      )
+    )
+    XCTAssertEqual(presentation.symbolName, "waveform")
   }
 
   func testAgentConfiguredActionsGetTheGenericSymbol() {

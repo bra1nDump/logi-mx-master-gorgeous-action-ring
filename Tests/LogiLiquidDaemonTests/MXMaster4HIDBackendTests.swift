@@ -299,7 +299,7 @@ final class MXMaster4HIDBackendTests: XCTestCase {
       case .sensePanelReleased:
         recorder.recordRelease()
         acceptedEdges.fulfill()
-      case .rawReport, .pointerDelta, .terminated:
+      case .rawReport, .pointerDelta, .wakeHealthProbeSucceeded, .terminated:
         break
       }
     }
@@ -321,6 +321,94 @@ final class MXMaster4HIDBackendTests: XCTestCase {
     wait(for: [acceptedEdges], timeout: 1)
     XCTAssertEqual(recorder.pressCount, 2)
     XCTAssertEqual(recorder.releaseCount, 1)
+    try backend.stop()
+  }
+
+  func testWakeProbeRearmsPressEdgeWithoutNeedingALostRelease() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 3_600
+    )
+    let presses = expectation(description: "pre-sleep and post-wake presses")
+    presses.expectedFulfillmentCount = 2
+    let probeSucceeded = expectation(description: "wake probe succeeded")
+    let recorder = SensePanelEdgeRecorder()
+
+    try backend.start { event in
+      switch event {
+      case .sensePanelPressed:
+        recorder.recordPress()
+        presses.fulfill()
+      case .wakeHealthProbeSucceeded:
+        probeSucceeded.fulfill()
+      case .rawReport, .sensePanelReleased, .pointerDelta, .terminated:
+        break
+      }
+    }
+
+    let pressed = try sensePanelPacket(
+      featureIndex: snapshot.featureIndex,
+      pressed: true
+    )
+    driver.enqueue(.success(pressed))
+    try waitUntil("pre-sleep press was accepted") {
+      recorder.pressCount == 1
+    }
+    backend.suspendInputForSleep()
+    backend.requestHealthProbe(generation: 1)
+    driver.enqueue(.success(pressed))
+
+    wait(for: [presses, probeSucceeded], timeout: 2)
+    try backend.stop()
+  }
+
+  func testDisplayWakeRearmsPressEdgeWithoutRequestingHealthProbe() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 3_600
+    )
+    let presses = expectation(description: "pre-display-sleep and post-display-wake presses")
+    presses.expectedFulfillmentCount = 2
+    let recorder = SensePanelEdgeRecorder()
+
+    try backend.start { event in
+      if case .sensePanelPressed = event {
+        recorder.recordPress()
+        presses.fulfill()
+      }
+    }
+
+    let pressed = try sensePanelPacket(
+      featureIndex: snapshot.featureIndex,
+      pressed: true
+    )
+    driver.enqueue(.success(pressed))
+    try waitUntil("pre-display-sleep press was accepted") {
+      recorder.pressCount == 1
+    }
+    backend.suspendInputForSleep()
+    backend.resumeInputAfterSleep()
+    driver.enqueue(.success(pressed))
+
+    wait(for: [presses], timeout: 2)
     try backend.stop()
   }
 
@@ -620,6 +708,33 @@ final class MXMaster4HIDBackendTests: XCTestCase {
     // The wall clock leaps while uptime does not: the machine slept.
     wallClockOffset.value = 120
     try waitUntil("post-wake probe re-applied the diversion") {
+      driver.callSnapshot().filter { $0 == "apply" }.count >= 2
+    }
+    try backend.stop()
+  }
+
+  func testRequestedWakeProbeRunsImmediatelyDespiteLongInterval() throws {
+    let directory = try makePrivateTemporaryDirectory()
+    defer { try? FileManager.default.removeItem(at: directory) }
+    let snapshot = try makeDiversionSnapshot()
+    let driver = FakeMXMaster4Driver(snapshot: snapshot)
+    let journal = try SensePanelDiversionJournalStore(
+      url: directory.appending(path: "diversion.json")
+    )
+    let backend = try MXMaster4HIDBackend(
+      driverFactory: FakeMXMaster4DriverFactory(driver: driver),
+      journal: journal,
+      eventPollMilliseconds: 5,
+      healthProbeInterval: 3_600
+    )
+
+    try backend.start { _ in }
+    Thread.sleep(forTimeInterval: 0.05)
+    XCTAssertFalse(driver.callSnapshot().contains("reporting-state"))
+
+    driver.dropDiversion()
+    backend.requestHealthProbe(generation: 1)
+    try waitUntil("requested wake probe re-applied the diversion") {
       driver.callSnapshot().filter { $0 == "apply" }.count >= 2
     }
     try backend.stop()

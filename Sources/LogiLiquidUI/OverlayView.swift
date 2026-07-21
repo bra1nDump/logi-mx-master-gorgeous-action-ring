@@ -43,7 +43,10 @@ public struct OverlayView: View {
       metaballBridge
         .allowsHitTesting(false)
 
-      GlassEffectContainer(spacing: 22) {
+      // Only the pointer-driven bubble may fuse with a target: 8pt keeps the
+      // closest neighboring targets (16pt edge gap in a three-action fan)
+      // from ever unioning with each other.
+      GlassEffectContainer(spacing: 8) {
         ZStack(alignment: .topLeading) {
           ForEach(model.targets) { target in
             targetBubble(target)
@@ -54,6 +57,7 @@ public struct OverlayView: View {
       .allowsHitTesting(false)
     }
     .ignoresSafeArea()
+    .opacity(effectivePresentationProgress)
     .animation(modelAnimation, value: model)
     .onAppear {
       guard presentationProgressOverride == nil else { return }
@@ -62,7 +66,7 @@ public struct OverlayView: View {
         return
       }
       presentationProgress = 0
-      withAnimation(OverlayTheme.presentationSpring) {
+      withAnimation(OverlayTheme.presentationAnimation) {
         presentationProgress = 1
       }
     }
@@ -87,27 +91,25 @@ public struct OverlayView: View {
   }
 
   private func targetBubble(_ target: OverlayTargetModel) -> some View {
-    let tint = target.isCurrent ? OverlayTheme.violetStrong : OverlayTheme.violet
+    let tint =
+      target.isCurrent
+      ? OverlayTheme.selectionTint(progress: model.approachProgress)
+      : OverlayTheme.violet.opacity(0.30)
     return targetIcon(target.presentation)
       .frame(
         width: OverlayTheme.targetBubbleDiameter,
         height: OverlayTheme.targetBubbleDiameter
       )
       .glassEffect(
-        .regular.tint(tint.opacity(target.isCurrent ? 0.55 : 0.30)).interactive(),
+        .regular.tint(tint).interactive(),
         in: Circle()
       )
       .glassEffectID(target.id, in: glassNamespace)
-      .scaleEffect(
-        (target.isCurrent && !reduceMotion ? OverlayTheme.selectedTargetScale : 1.0)
-          * (0.72 + 0.28 * effectivePresentationProgress)
-      )
-      .opacity(effectivePresentationProgress)
       .accessibilityLabel(Text(target.presentation.label))
       .accessibilityAddTraits(target.isCurrent ? .isSelected : [])
       .position(
         // Center coordinates are authoritative interaction geometry and never
-        // animate. Entry motion is limited to scale/opacity.
+        // animate. Presentation changes opacity only.
         x: localOrigin.x + target.offset.x,
         y: localOrigin.y + target.offset.y
       )
@@ -155,7 +157,10 @@ public struct OverlayView: View {
         width: OverlayTheme.movingBubbleDiameter,
         height: OverlayTheme.movingBubbleDiameter
       )
-      .glassEffect(.regular.tint(OverlayTheme.violet.opacity(0.30)).interactive(), in: Circle())
+      .glassEffect(
+        .regular.tint(OverlayTheme.selectionTint(progress: model.approachProgress)).interactive(),
+        in: Circle()
+      )
       .glassEffectID("moving-bubble", in: glassNamespace)
       .position(
         x: localOrigin.x + model.bubbleOffset.x,

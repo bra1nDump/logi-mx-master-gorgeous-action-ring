@@ -55,9 +55,9 @@ public struct GymScenario: Sendable {
 
     case .targeting:
       let profile = RingInteractionProfile.default
-      // Stay 75% of the merge-start distance from the top target, producing
+      // Stay 75% of the merge-start distance from the bottom target, producing
       // exactly 0.25 merge progress independently of the current ring radius.
-      let targetingY = -(profile.ringRadius - (0.75 * profile.mergeStartDistance))
+      let targetingY = profile.ringRadius - (0.75 * profile.mergeStartDistance)
       let targeting = machine.handle(
         .pointerDelta(Vector2(x: 0, y: targetingY))
       )
@@ -81,7 +81,7 @@ public struct GymScenario: Sendable {
   /// Solves Core's exact moving-circle overlap boundary. A tiny inward
   /// epsilon makes the representative frame deterministically cross the latch
   /// despite floating-point rounding, while remaining visually at the threshold.
-  private static func latchThresholdPointerY() -> Double {
+  public static func latchThresholdCenterDistance() -> Double {
     let profile = RingInteractionProfile.default
     let targetArea =
       RingInteractionThresholds.latchOverlapFraction * Double.pi
@@ -103,7 +103,11 @@ public struct GymScenario: Sendable {
         separatedDistance = candidate
       }
     }
-    let centerDistance = overlappingDistance - 0.000_001
-    return -(profile.ringRadius - centerDistance)
+    return overlappingDistance - 0.000_001
+  }
+
+  /// Pointer distance from the origin that just latches the bottom target.
+  private static func latchThresholdPointerY() -> Double {
+    RingInteractionProfile.default.ringRadius - latchThresholdCenterDistance()
   }
 }

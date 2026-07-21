@@ -32,34 +32,20 @@ struct OverlayHostView: View {
   let onPrimaryClick: () -> Void
 
   var body: some View {
-    GeometryReader { proxy in
-      ZStack {
-        if let model = store.snapshot.model {
-          OverlayView(
-            model: model,
-            localOrigin: store.snapshot.localOrigin,
-            onPrimaryClick: onPrimaryClick
-          )
-          .opacity(store.snapshot.isVisible ? 1 : 0)
-          .scaleEffect(
-            store.snapshot.isVisible ? 1 : OverlayTheme.dismissedScale,
-            anchor: dismissalAnchor(in: proxy.size)
-          )
-          .animation(
-            OverlayTheme.dismissalAnimation,
-            value: store.snapshot.isVisible
-          )
-          .allowsHitTesting(store.snapshot.isVisible)
-        }
+    ZStack {
+      if let model = store.snapshot.model {
+        OverlayView(
+          model: model,
+          localOrigin: store.snapshot.localOrigin,
+          onPrimaryClick: onPrimaryClick
+        )
+        .opacity(store.snapshot.isVisible ? 1 : 0)
+        .animation(
+          OverlayTheme.dismissalAnimation,
+          value: store.snapshot.isVisible
+        )
+        .allowsHitTesting(store.snapshot.isVisible)
       }
     }
-  }
-
-  private func dismissalAnchor(in size: CGSize) -> UnitPoint {
-    guard size.width > 0, size.height > 0 else { return .center }
-    return UnitPoint(
-      x: store.snapshot.localOrigin.x / size.width,
-      y: store.snapshot.localOrigin.y / size.height
-    )
   }
 }

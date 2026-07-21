@@ -139,17 +139,18 @@ public struct ResolvedMouseConfiguration: Codable, Equatable, Sendable {
 public struct MouseConfiguration: Equatable, Sendable {
   public static let currentVersion = 2
 
-  /// The requested first-run layout. It contains only executable actions; the
-  /// bottom application-specific area stays present in zone metadata but empty.
+  /// The requested first-run layout. It contains only executable actions.
   public static let logiLiquidDefault = MouseConfiguration(
     actions: [
-      "Play Spotify": .spotify(SpotifyAction(playback: .play)),
       "Telegram": .application(ApplicationAction(bundleID: "ru.keepcoder.Telegram")),
+      "Twitter": .url(
+        URLAction(url: URL(string: "https://x.com/")!)
+      ),
       "ChatGPT Quick Chat": .shortcut(
         ShortcutAction(key: "space", modifiers: [.option])
       ),
       "Aqua Voice": .shortcut(
-        ShortcutAction(key: "fn", repeatCount: 2)
+        ShortcutAction(key: "rightoption", repeatCount: 2)
       ),
       "CleanShot Capture": .url(
         URLAction(url: URL(string: "cleanshot://capture-area")!)
@@ -157,12 +158,15 @@ public struct MouseConfiguration: Equatable, Sendable {
       "CleanShot Record": .url(
         URLAction(url: URL(string: "cleanshot://record-screen")!)
       ),
+      "Mission Control": .application(
+        ApplicationAction(bundleID: "com.apple.exposelauncher")
+      ),
     ],
     zones: RingZones(
-      top: ["Play Spotify"],
-      right: ["Telegram", "ChatGPT Quick Chat"],
-      bottom: [],
-      left: ["Aqua Voice", "CleanShot Capture", "CleanShot Record"]
+      top: [],
+      right: ["Telegram", "Twitter", "ChatGPT Quick Chat"],
+      bottom: ["Mission Control"],
+      left: ["CleanShot Record", "CleanShot Capture", "Aqua Voice"]
     )
   )
 

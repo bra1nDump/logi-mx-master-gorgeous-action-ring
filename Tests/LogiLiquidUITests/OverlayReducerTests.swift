@@ -25,8 +25,8 @@ final class OverlayReducerTests: XCTestCase {
     // A committed frame handed to a fresh reducer must not show the overlay.
     var other = makeMachine()
     _ = other.handle(.panelTrigger(origin: origin, frontmostApplication: .unknown))
-    _ = other.handle(.pointerDelta(Vector2(x: 0, y: -70)))
-    let latched = other.handle(.pointerDelta(Vector2(x: 0, y: -35)))
+    _ = other.handle(.pointerDelta(Vector2(x: 0, y: 70)))
+    let latched = other.handle(.pointerDelta(Vector2(x: 0, y: 35)))
     XCTAssertEqual(latched.frame.phase, .latched)
     let committed = other.handle(.completeCommit)
     XCTAssertEqual(committed.frame.phase, .committed)
@@ -51,9 +51,9 @@ final class OverlayReducerTests: XCTestCase {
   func testLatchRemainsVisibleUntilTerminalCommitThenHidesExactlyOnce() {
     var machine = makeMachine()
     let invoked = machine.handle(.panelTrigger(origin: origin, frontmostApplication: .unknown))
-    let tracking = machine.handle(.pointerDelta(Vector2(x: 0, y: -70)))
+    let tracking = machine.handle(.pointerDelta(Vector2(x: 0, y: 70)))
     XCTAssertEqual(tracking.frame.phase, .tracking)
-    let latched = machine.handle(.pointerDelta(Vector2(x: 0, y: -35)))
+    let latched = machine.handle(.pointerDelta(Vector2(x: 0, y: 35)))
     XCTAssertEqual(latched.frame.phase, .latched)
     let committed = machine.handle(.completeCommit)
     XCTAssertEqual(committed.frame.phase, .committed)

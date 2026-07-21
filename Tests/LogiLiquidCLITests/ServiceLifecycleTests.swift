@@ -18,6 +18,7 @@ final class ServiceLifecycleTests: XCTestCase {
     )
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceDaemonURL.path)
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceOverlayURL.path)
+    fixture.fileSystem.existingPaths.insert(fixture.paths.sourceUIResourceBundleURL.path)
 
     let result = try fixture.controller.perform(.install)
 
@@ -34,6 +35,7 @@ final class ServiceLifecycleTests: XCTestCase {
         "directory:\(fixture.paths.launchAgentsDirectory.path):493",
         "copy:\(fixture.paths.sourceDaemonURL.path):\(fixture.paths.installedDaemonURL.path)",
         "copy:\(fixture.paths.sourceOverlayURL.path):\(fixture.paths.installedOverlayURL.path)",
+        "copy-directory:\(fixture.paths.sourceUIResourceBundleURL.path):\(fixture.paths.installedUIResourceBundleURL.path)",
         "write:\(fixture.paths.launchAgentURL.path):384",
         "write:\(fixture.paths.overlayLaunchAgentURL.path):384",
       ]
@@ -124,16 +126,19 @@ final class ServiceLifecycleTests: XCTestCase {
       processResults: [
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
       ]
     )
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceDaemonURL.path)
     fixture.fileSystem.executablePaths.insert(fixture.paths.sourceOverlayURL.path)
+    fixture.fileSystem.existingPaths.insert(fixture.paths.sourceUIResourceBundleURL.path)
 
     _ = try fixture.controller.perform(.install)
 
@@ -142,10 +147,12 @@ final class ServiceLifecycleTests: XCTestCase {
       [
         ["print", fixture.paths.launchdTarget],
         ["bootout", fixture.paths.launchdTarget],
+        ["print", fixture.paths.launchdTarget],
         ["bootstrap", fixture.paths.launchdDomain, fixture.paths.launchAgentURL.path],
         ["kickstart", "-k", fixture.paths.launchdTarget],
         ["print", fixture.paths.overlayLaunchdTarget],
         ["bootout", fixture.paths.overlayLaunchdTarget],
+        ["print", fixture.paths.overlayLaunchdTarget],
         ["bootstrap", fixture.paths.launchdDomain, fixture.paths.overlayLaunchAgentURL.path],
         ["kickstart", "-k", fixture.paths.overlayLaunchdTarget],
       ]
@@ -246,8 +253,10 @@ final class ServiceLifecycleTests: XCTestCase {
       processResults: [
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
         ServiceProcessResult(terminationStatus: 0),
         ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
       ]
     )
     fixture.fileSystem.existingPaths.insert(fixture.paths.configurationURL.path)
@@ -261,8 +270,10 @@ final class ServiceLifecycleTests: XCTestCase {
       [
         ["print", fixture.paths.launchdTarget],
         ["bootout", fixture.paths.launchdTarget],
+        ["print", fixture.paths.launchdTarget],
         ["print", fixture.paths.overlayLaunchdTarget],
         ["bootout", fixture.paths.overlayLaunchdTarget],
+        ["print", fixture.paths.overlayLaunchdTarget],
       ]
     )
     XCTAssertEqual(
@@ -272,6 +283,7 @@ final class ServiceLifecycleTests: XCTestCase {
         "remove:\(fixture.paths.installedDaemonURL.path)",
         "remove:\(fixture.paths.overlayLaunchAgentURL.path)",
         "remove:\(fixture.paths.installedOverlayURL.path)",
+        "remove:\(fixture.paths.installedUIResourceBundleURL.path)",
       ]
     )
     XCTAssertTrue(fixture.fileSystem.existingPaths.contains(fixture.paths.configurationURL.path))
@@ -298,6 +310,19 @@ final class ServiceLifecycleTests: XCTestCase {
     }
     XCTAssertTrue(missingOverlay.fileSystem.operations.isEmpty)
 
+    let missingResources = makeFixture(processResults: [])
+    missingResources.fileSystem.executablePaths.formUnion([
+      missingResources.paths.sourceDaemonURL.path,
+      missingResources.paths.sourceOverlayURL.path,
+    ])
+    XCTAssertThrowsError(try missingResources.controller.perform(.install)) { error in
+      XCTAssertEqual(
+        error as? ServiceLifecycleError,
+        .overlayResourceBundleMissing(missingResources.paths.sourceUIResourceBundleURL.path)
+      )
+    }
+    XCTAssertTrue(missingResources.fileSystem.operations.isEmpty)
+
     let bootstrapFailure = makeInstalledFixture(
       processResults: [
         ServiceProcessResult(terminationStatus: 113),
@@ -317,6 +342,88 @@ final class ServiceLifecycleTests: XCTestCase {
         )
       )
     }
+  }
+
+  func testInstallWaitsForBootoutStateBeforeBootstrapWithoutFixedDelay() throws {
+    let fixture = makeFixture(
+      processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 113),
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+      ]
+    )
+    fixture.fileSystem.executablePaths.insert(fixture.paths.sourceDaemonURL.path)
+    fixture.fileSystem.executablePaths.insert(fixture.paths.sourceOverlayURL.path)
+    fixture.fileSystem.existingPaths.insert(fixture.paths.sourceUIResourceBundleURL.path)
+
+    XCTAssertTrue(try fixture.controller.perform(.install).loaded)
+    XCTAssertEqual(
+      fixture.processRunner.invocations.map(\.arguments),
+      [
+        ["print", fixture.paths.launchdTarget],
+        ["bootout", fixture.paths.launchdTarget],
+        ["print", fixture.paths.launchdTarget],
+        ["print", fixture.paths.launchdTarget],
+        ["print", fixture.paths.launchdTarget],
+        ["bootstrap", fixture.paths.launchdDomain, fixture.paths.launchAgentURL.path],
+        ["kickstart", "-k", fixture.paths.launchdTarget],
+        ["print", fixture.paths.overlayLaunchdTarget],
+        ["bootstrap", fixture.paths.launchdDomain, fixture.paths.overlayLaunchAgentURL.path],
+        ["kickstart", "-k", fixture.paths.overlayLaunchdTarget],
+      ]
+    )
+    XCTAssertEqual(fixture.timing.waitedIntervals, [0.05, 0.1])
+  }
+
+  func testBootoutStateWaitHasStructuredBoundedTimeout() throws {
+    let fixture = makeInstalledFixture(
+      processResults: [
+        ServiceProcessResult(terminationStatus: 0),
+        ServiceProcessResult(terminationStatus: 0),
+      ]
+        + Array(
+          repeating: ServiceProcessResult(terminationStatus: 0),
+          count: 36
+        )
+    )
+
+    XCTAssertThrowsError(try fixture.controller.perform(.stop)) { error in
+      XCTAssertEqual(
+        error as? ServiceLifecycleError,
+        .launchdTransitionTimedOut(
+          target: fixture.paths.launchdTarget,
+          timeout: ServiceLifecycleController.launchdTransitionTimeout
+        )
+      )
+    }
+    XCTAssertEqual(fixture.timing.monotonicTime, 15, accuracy: 0.000_001)
+  }
+
+  func testLaunchctlPrintFailureIsNotTreatedAsAnAbsentJob() throws {
+    let fixture = makeInstalledFixture(
+      processResults: [
+        ServiceProcessResult(terminationStatus: 5, output: "Input/output error")
+      ]
+    )
+
+    XCTAssertThrowsError(try fixture.controller.perform(.uninstall)) { error in
+      XCTAssertEqual(
+        error as? ServiceLifecycleError,
+        .launchctl(
+          arguments: ["print", fixture.paths.launchdTarget],
+          status: 5,
+          output: "Input/output error"
+        )
+      )
+    }
+    XCTAssertTrue(fixture.fileSystem.operations.isEmpty)
   }
 
   func testLocalFileSystemReplacesExecutableAtomicallyWithPrivatePermissions() throws {
@@ -341,6 +448,32 @@ final class ServiceLifecycleTests: XCTestCase {
     XCTAssertFalse(siblings.contains { $0.hasSuffix(".tmp") })
   }
 
+  func testLocalFileSystemAtomicallySwapsResourceBundleDirectory() throws {
+    let root = URL(
+      filePath: "/tmp/logi-liquid-service-resources-\(UUID().uuidString)",
+      directoryHint: .isDirectory
+    )
+    defer { try? FileManager.default.removeItem(at: root) }
+    let source = root.appending(path: "source.bundle", directoryHint: .isDirectory)
+    let destination = root.appending(path: "installed.bundle", directoryHint: .isDirectory)
+    try FileManager.default.createDirectory(at: source, withIntermediateDirectories: true)
+    try FileManager.default.createDirectory(at: destination, withIntermediateDirectories: true)
+    try Data("new resource".utf8).write(to: source.appending(path: "mark.svg"))
+    try Data("old resource".utf8).write(to: destination.appending(path: "old.svg"))
+
+    let fileSystem = LocalServiceFileSystem()
+    try fileSystem.copyDirectoryAtomically(from: source, to: destination)
+
+    XCTAssertEqual(
+      try Data(contentsOf: destination.appending(path: "mark.svg")),
+      Data("new resource".utf8)
+    )
+    XCTAssertFalse(
+      FileManager.default.fileExists(atPath: destination.appending(path: "old.svg").path))
+    let siblings = try FileManager.default.contentsOfDirectory(atPath: root.path)
+    XCTAssertFalse(siblings.contains { $0.hasSuffix(".tmp") })
+  }
+
   private func makeInstalledFixture(
     processResults: [ServiceProcessResult]
   ) -> LifecycleFixture {
@@ -350,6 +483,7 @@ final class ServiceLifecycleTests: XCTestCase {
       fixture.paths.launchAgentURL.path,
       fixture.paths.installedOverlayURL.path,
       fixture.paths.overlayLaunchAgentURL.path,
+      fixture.paths.installedUIResourceBundleURL.path,
     ])
     return fixture
   }
@@ -364,14 +498,17 @@ final class ServiceLifecycleTests: XCTestCase {
     )
     let fileSystem = RecordingServiceFileSystem()
     let processRunner = RecordingServiceProcessRunner(results: processResults)
+    let timing = RecordingServiceLifecycleTiming()
     return LifecycleFixture(
       paths: paths,
       fileSystem: fileSystem,
       processRunner: processRunner,
+      timing: timing,
       controller: ServiceLifecycleController(
         paths: paths,
         fileSystem: fileSystem,
-        processRunner: processRunner
+        processRunner: processRunner,
+        timing: timing
       )
     )
   }
@@ -403,12 +540,24 @@ private struct LifecycleFixture {
   let paths: ServiceLifecyclePaths
   let fileSystem: RecordingServiceFileSystem
   let processRunner: RecordingServiceProcessRunner
+  let timing: RecordingServiceLifecycleTiming
   let controller: ServiceLifecycleController
+}
+
+private final class RecordingServiceLifecycleTiming: ServiceLifecycleTiming {
+  private(set) var monotonicTime: TimeInterval = 0
+  private(set) var waitedIntervals: [TimeInterval] = []
+
+  func wait(for interval: TimeInterval) {
+    waitedIntervals.append(interval)
+    monotonicTime += interval
+  }
 }
 
 private enum ServiceFileOperation: Equatable {
   case directory(path: String, permissions: Int)
   case copy(source: String, destination: String)
+  case copyDirectory(source: String, destination: String)
   case write(path: String, permissions: Int)
   case remove(path: String)
 
@@ -418,6 +567,8 @@ private enum ServiceFileOperation: Equatable {
       "directory:\(path):\(permissions)"
     case .copy(let source, let destination):
       "copy:\(source):\(destination)"
+    case .copyDirectory(let source, let destination):
+      "copy-directory:\(source):\(destination)"
     case .write(let path, let permissions):
       "write:\(path):\(permissions)"
     case .remove(let path):
@@ -449,6 +600,11 @@ private final class RecordingServiceFileSystem: ServiceFileSystem {
     operations.append(.copy(source: sourceURL.path, destination: destinationURL.path))
     existingPaths.insert(destinationURL.path)
     executablePaths.insert(destinationURL.path)
+  }
+
+  func copyDirectoryAtomically(from sourceURL: URL, to destinationURL: URL) throws {
+    operations.append(.copyDirectory(source: sourceURL.path, destination: destinationURL.path))
+    existingPaths.insert(destinationURL.path)
   }
 
   func writeAtomically(_ data: Data, to destinationURL: URL, permissions: Int) throws {

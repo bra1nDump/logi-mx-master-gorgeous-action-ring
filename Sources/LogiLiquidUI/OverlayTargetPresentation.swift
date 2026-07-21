@@ -44,13 +44,21 @@ public enum OverlayTargetSymbols {
   private static let knownIcons: [String: OverlayTargetIcon] = [
     "Play Spotify": .systemSymbol("play.fill"),
     "Telegram": .systemSymbol("paperplane.fill"),
+    "Twitter": .bundledTemplate(
+      resourceName: "TwitterBirdMark",
+      fallbackSymbol: "bird.fill"
+    ),
     "ChatGPT Quick Chat": .bundledTemplate(
       resourceName: "OpenAIChatGPTMark",
       fallbackSymbol: "text.bubble.fill"
     ),
-    "Aqua Voice": .systemSymbol("mic.fill"),
+    "Aqua Voice": .bundledTemplate(
+      resourceName: "AquaVoiceBarsMark",
+      fallbackSymbol: "waveform"
+    ),
     "CleanShot Capture": .systemSymbol("camera.viewfinder"),
     "CleanShot Record": .systemSymbol("record.circle"),
+    "Mission Control": .systemSymbol("rectangle.3.group"),
   ]
 
   public static func presentation(forActionNamed name: String) -> OverlayTargetPresentation {

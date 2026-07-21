@@ -81,6 +81,8 @@ final class RingInteractionMachineTests: XCTestCase {
     XCTAssertEqual(beforeThreshold.frame.phase, .tracking)
     XCTAssertEqual(beforeThreshold.frame.currentTarget?.actionName, "Spotify")
     XCTAssertEqual(beforeThreshold.frame.mergeProgress, 0.39, accuracy: 0.000_001)
+    // 69.5 of 100 points closed: the approach ramps gradually with proximity.
+    XCTAssertEqual(beforeThreshold.frame.approachProgress, 1 - (30.5 / 100), accuracy: 0.000_001)
     XCTAssertNil(beforeThreshold.actionToPerform)
 
     let latched = machine.handle(.pointerDelta(Vector2(x: 0, y: -0.01)))
@@ -92,6 +94,7 @@ final class RingInteractionMachineTests: XCTestCase {
       latched.frame.currentTarget?.vectorFromOrigin
     )
     XCTAssertEqual(latched.frame.mergeProgress, 1)
+    XCTAssertEqual(latched.frame.approachProgress, 1)
     XCTAssertEqual(latched.cursorVisibilityIntent, .none)
     XCTAssertEqual(latched.hapticIntent, .play(waveformID: 0))
 
@@ -111,6 +114,9 @@ final class RingInteractionMachineTests: XCTestCase {
     let selected = machine.handle(.pointerDelta(Vector2(x: 0, y: -30)))
     XCTAssertEqual(selected.frame.currentTarget?.actionName, "Spotify")
     XCTAssertEqual(selected.frame.mergeProgress, 0)
+    // The merge stays dormant outside the merge distance, but the approach
+    // already ramps: 30 of 100 points closed.
+    XCTAssertEqual(selected.frame.approachProgress, 1 - (70.0 / 100.0), accuracy: 0.000_001)
 
     let clicked = machine.handle(.primaryClick)
     XCTAssertEqual(clicked.frame.phase, .cancelled)

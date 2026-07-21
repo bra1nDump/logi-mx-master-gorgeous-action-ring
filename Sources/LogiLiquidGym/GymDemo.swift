@@ -175,7 +175,8 @@ private final class GymDemoWindowHost {
 }
 
 /// The composed demo frame: a macOS-style wallpaper, the standard pointer, the
-/// Sense Panel buzz, and the production `OverlayView` on top.
+/// Sense Panel buzz, the production `OverlayView` on top, and a recording HUD
+/// for the voice hand-off.
 private struct GymDemoScene: View {
   let frame: GymDemoFrame
   let timeline: GymDemoTimeline
@@ -200,6 +201,7 @@ private struct GymDemoScene: View {
         commitFlash(center: center)
         buzzRipples(center: center)
         pointer(center: center)
+        recordingHUD(center: center)
       }
       .frame(width: size.width, height: size.height)
       .scaleEffect(sceneScale)
@@ -258,7 +260,7 @@ private struct GymDemoScene: View {
   @ViewBuilder
   private func commitFlash(center: CGPoint) -> some View {
     if frame.commitPulse > 0, frame.commitPulse < 1 {
-      let target = timeline.selectedTargetOffset
+      let target = timeline.commitTargetOffset
       Circle()
         .stroke(
           OverlayTheme.violetStrong.opacity((1 - frame.commitPulse) * 0.8),
@@ -272,8 +274,43 @@ private struct GymDemoScene: View {
     }
   }
 
+  /// The voice hand-off: once the microphone action commits, a floating pill
+  /// shows live recording levels. This stands in for the voice app's own HUD,
+  /// which only appears on a real desktop.
+  @ViewBuilder
+  private func recordingHUD(center: CGPoint) -> some View {
+    if frame.recordingProgress > 0 {
+      let time = Double(frame.index) / Double(timeline.configuration.framesPerSecond)
+      HStack(spacing: 9) {
+        Image(systemName: "mic.fill")
+          .font(.system(size: 14, weight: .semibold))
+          .foregroundStyle(OverlayTheme.text)
+        HStack(spacing: 3) {
+          ForEach(0..<5, id: \.self) { bar in
+            let level = 0.5 + (0.5 * sin((time * 7) + (Double(bar) * 1.1)))
+            Capsule()
+              .fill(OverlayTheme.text.opacity(0.85))
+              .frame(width: 3, height: 5 + (9 * level))
+          }
+        }
+        Circle()
+          .fill(Color.red)
+          .frame(width: 7, height: 7)
+          .opacity(0.55 + (0.45 * sin(time * 5)))
+      }
+      .padding(.horizontal, 14)
+      .padding(.vertical, 9)
+      .glassEffect(
+        .regular.tint(OverlayTheme.violet.opacity(0.30)).interactive(),
+        in: Capsule()
+      )
+      .scaleEffect(0.82 + (0.18 * frame.recordingProgress))
+      .opacity(frame.recordingProgress)
+      .position(x: center.x, y: center.y + 152)
+    }
+  }
+
   private var model: OverlayRenderModel {
-    let isSelected = frame.selectionStrength > 0.5
     let targets = timeline.targets.map { target in
       OverlayTargetModel(
         id: target.id,
@@ -281,15 +318,15 @@ private struct GymDemoScene: View {
         zone: target.zone,
         presentation: target.presentation,
         offset: target.offset,
-        isCurrent: target.id == timeline.selectedTargetID && isSelected
+        isCurrent: target.id == frame.activeTargetID
       )
     }
     let phase: RingInteractionPhase =
       switch frame.phase {
-      case .desktop, .buzz: .idle
-      case .invocation: .invoked
-      case .travel: .tracking
-      case .suction, .committed, .dismissing: .latched
+      case .bloom, .rebloom: .invoked
+      case .tease, .dwell, .travel: .tracking
+      case .suction, .committed: .latched
+      case .dismissing, .desktop, .recording: .idle
       }
     return OverlayRenderModel(
       phase: phase,
@@ -297,7 +334,8 @@ private struct GymDemoScene: View {
       targets: targets,
       bubbleOffset: frame.bubbleOffset,
       mergeProgress: frame.mergeProgress,
-      currentTargetID: isSelected ? timeline.selectedTargetID : nil
+      approachProgress: frame.approachProgress,
+      currentTargetID: frame.activeTargetID
     )
   }
 }
@@ -348,13 +386,16 @@ private struct GymDemoWallpaper: View {
 }
 
 public enum GymDemoPhase: String, CaseIterable, Sendable {
+  case bloom
+  case tease
+  case dwell
+  case dismissing
   case desktop
-  case buzz
-  case invocation
+  case rebloom
   case travel
   case suction
   case committed
-  case dismissing
+  case recording
 }
 
 /// One deterministic visual frame. Geometry remains in the production
@@ -366,11 +407,16 @@ public struct GymDemoFrame: Equatable, Sendable {
   public let overallOpacity: Double
   public let bubbleOffset: CGPoint
   public let mergeProgress: Double
-  public let selectionStrength: Double
+  /// Gradual selection lighting toward `activeTargetID`.
+  public let approachProgress: Double
+  /// The target lit by the current approach, if any.
+  public let activeTargetID: String?
   public let cursorVisible: Bool
   public let cursorShakeOffset: CGPoint
   public let buzzProgress: Double
   public let commitPulse: Double
+  /// 0 hides the voice-recording HUD; 1 shows it fully settled.
+  public let recordingProgress: Double
 
   public init(
     index: Int,
@@ -379,11 +425,13 @@ public struct GymDemoFrame: Equatable, Sendable {
     overallOpacity: Double,
     bubbleOffset: CGPoint,
     mergeProgress: Double,
-    selectionStrength: Double,
+    approachProgress: Double,
+    activeTargetID: String?,
     cursorVisible: Bool,
     cursorShakeOffset: CGPoint = .zero,
     buzzProgress: Double = 0,
-    commitPulse: Double = 0
+    commitPulse: Double = 0,
+    recordingProgress: Double = 0
   ) {
     self.index = index
     self.phase = phase
@@ -391,128 +439,232 @@ public struct GymDemoFrame: Equatable, Sendable {
     self.overallOpacity = overallOpacity
     self.bubbleOffset = bubbleOffset
     self.mergeProgress = mergeProgress
-    self.selectionStrength = selectionStrength
+    self.approachProgress = approachProgress
+    self.activeTargetID = activeTargetID
     self.cursorVisible = cursorVisible
     self.cursorShakeOffset = cursorShakeOffset
     self.buzzProgress = buzzProgress
     self.commitPulse = commitPulse
+    self.recordingProgress = recordingProgress
   }
 }
 
-/// A clock-free animation authored from the real Core/Gym scenarios. It opens
-/// on a desktop with the standard pointer, buzzes for the Sense Panel press,
-/// blooms the ring, travels to Core's configured overlap boundary, performs the
-/// 160 ms suction, commits, and dismisses back to the desktop so the video
-/// loops cleanly.
+/// A clock-free animation authored from the real Core/Gym scenarios. The first
+/// frame already shows the bloomed ring, so the result is visible immediately.
+/// Act 1 slowly teases the right-side middle target to show gradual approach
+/// lighting, then a Sense Panel press dismisses the ring and the cursor
+/// returns. Act 2 presses again, blooms, drops straight to the bottom
+/// microphone target, latches with the haptic buzz, and hands off to a
+/// recording HUD as the cursor reappears.
 public struct GymDemoTimeline: Sendable {
   public enum Timing {
-    public static let cursorIntroEnd = 0.32
-    public static let buzzEnd = 0.72
-    public static let invocationEnd = 1.04
-    public static let travelStart = 1.12
-    public static let travelEnd = 1.68
-    public static let suctionEnd = 1.84
-    public static let dismissStart = 2.16
-    public static let dismissEnd = 2.48
-    public static let total = 2.8
+    // Act 1: tease one target, then toggle the ring closed.
+    public static let teaseStart = 0.5
+    public static let teaseEnd = 1.7
+    public static let dwellEnd = 2.3
+    public static let dismissEnd = 2.62
+    public static let desktopEnd = 3.3
+    // Act 2: reopen and commit straight down to the microphone.
+    public static let rebloomEnd = 3.65
+    public static let travelStart = 3.8
+    public static let travelEnd = 4.6
+    public static let suctionEnd = 4.76
+    public static let commitEnd = 5.06
+    public static let fadeEnd = 5.3
+    public static let total = 7.5
+
+    /// Every real buzz surfaces as one ripple window: both Sense Panel
+    /// presses and the haptic fired exactly once when the action latches.
+    public static let buzzWindows: [(start: Double, end: Double)] = [
+      (dwellEnd, dwellEnd + 0.25),
+      (desktopEnd, desktopEnd + 0.25),
+      (travelEnd, travelEnd + 0.25),
+    ]
   }
+
+  /// Act 1 stops here: a fifth of the way to the teased target, far enough
+  /// for the gradual lighting to read without ever threatening a latch.
+  private static let teaseFraction = 0.2
 
   public let configuration: GymDemoConfiguration
   public let targets: [OverlayTargetModel]
-  public let selectedTargetID: String
-  public let selectedTargetOffset: CGPoint
+  /// The right-zone middle target teased in act 1.
+  public let teaseTargetID: String
+  public let teaseTargetOffset: CGPoint
+  /// The bottom target committed in act 2.
+  public let commitTargetID: String
+  public let commitTargetOffset: CGPoint
+  /// Core's exact latch boundary along the path to the commit target.
   public let latchThresholdOffset: CGPoint
 
   public init(configuration: GymDemoConfiguration = .default) throws {
     try configuration.validate()
     let logicalSize = CGSize(width: configuration.pixelWidth, height: configuration.pixelHeight)
     let invoked = try GymScenario.make(.invoked, logicalSize: logicalSize)
-    let latched = try GymScenario.make(.latchedSuctionThreshold, logicalSize: logicalSize)
+
+    let rightTargets = invoked.model.targets.filter { $0.zone == .right }
     guard
-      let selected = invoked.model.targets.first(where: { $0.zone == .top }),
-      latched.transition.frame.phase == .latched
+      !rightTargets.isEmpty,
+      let commit = invoked.model.targets.first(where: { $0.zone == .bottom })
     else {
       throw GymError.invalidDemoScenario
     }
 
+    let tease = rightTargets[rightTargets.count / 2]
+    let commitDistance = hypot(commit.offset.x, commit.offset.y)
+    let latchDistance = GymScenario.latchThresholdCenterDistance()
+    guard commitDistance > latchDistance else {
+      throw GymError.invalidDemoScenario
+    }
+    let latchScale = (commitDistance - latchDistance) / commitDistance
+
     self.configuration = configuration
     targets = invoked.model.targets
-    selectedTargetID = selected.id
-    selectedTargetOffset = selected.offset
+    teaseTargetID = tease.id
+    teaseTargetOffset = tease.offset
+    commitTargetID = commit.id
+    commitTargetOffset = commit.offset
     latchThresholdOffset = CGPoint(
-      x: latched.transition.frame.accumulatedPointerDelta.x,
-      y: latched.transition.frame.accumulatedPointerDelta.y
+      x: commit.offset.x * latchScale,
+      y: commit.offset.y * latchScale
     )
   }
 
   public func frame(at index: Int) -> GymDemoFrame {
     let clampedIndex = min(max(index, 0), configuration.frameCount - 1)
     let time = Double(clampedIndex) / Double(configuration.framesPerSecond)
+    let buzz = Self.buzzProgress(at: time)
+    let shake = Self.cursorShake(buzz: buzz)
 
-    if time < Timing.cursorIntroEnd {
-      return desktopFrame(index: clampedIndex)
-    }
-
-    if time < Timing.buzzEnd {
-      let progress = (time - Timing.cursorIntroEnd) / (Timing.buzzEnd - Timing.cursorIntroEnd)
-      // A decaying shake sells the physical Sense Panel click.
-      let decay = 1 - Self.smoothstep(progress)
-      let shake = CGPoint(
-        x: 3.4 * sin(progress * .pi * 9) * decay,
-        y: 1.2 * sin(progress * .pi * 13) * decay
-      )
+    switch time {
+    // Act 1 opens on the fully bloomed ring: the first frame shows the result.
+    case ..<Timing.teaseStart:
       return GymDemoFrame(
         index: clampedIndex,
-        phase: .buzz,
-        presentationProgress: 0,
-        overallOpacity: 0,
-        bubbleOffset: .zero,
-        mergeProgress: 0,
-        selectionStrength: 0,
-        cursorVisible: true,
-        cursorShakeOffset: shake,
-        buzzProgress: progress
-      )
-    }
-
-    if time < Timing.invocationEnd {
-      let progress = Self.smoothstep(
-        (time - Timing.buzzEnd) / (Timing.invocationEnd - Timing.buzzEnd)
-      )
-      return GymDemoFrame(
-        index: clampedIndex,
-        phase: .invocation,
-        presentationProgress: progress,
-        overallOpacity: min(1, progress * 1.7),
-        bubbleOffset: .zero,
-        mergeProgress: 0,
-        selectionStrength: 0,
-        cursorVisible: false
-      )
-    }
-
-    if time < Timing.travelStart {
-      return GymDemoFrame(
-        index: clampedIndex,
-        phase: .invocation,
+        phase: .bloom,
         presentationProgress: 1,
         overallOpacity: 1,
         bubbleOffset: .zero,
         mergeProgress: 0,
-        selectionStrength: 0,
-        cursorVisible: false
+        approachProgress: 0,
+        activeTargetID: nil,
+        cursorVisible: false,
+        buzzProgress: buzz
       )
-    }
 
-    if time < Timing.travelEnd {
+    case ..<Timing.teaseEnd:
+      let progress = Self.smootherstep(
+        (time - Timing.teaseStart) / (Timing.teaseEnd - Timing.teaseStart)
+      )
+      // A restrained lateral arc makes pointer motion legible without changing
+      // the exact partial-approach endpoint.
+      let lateralArc = 8 * sin(.pi * progress)
+      let offset = CGPoint(
+        x: Self.interpolate(0, teaseTargetOffset.x * Self.teaseFraction, progress),
+        y: Self.interpolate(0, teaseTargetOffset.y * Self.teaseFraction, progress) + lateralArc
+      )
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .tease,
+        presentationProgress: 1,
+        overallOpacity: 1,
+        bubbleOffset: offset,
+        mergeProgress: mergeProgress(at: offset, toward: teaseTargetOffset),
+        approachProgress: approachProgress(at: offset, toward: teaseTargetOffset),
+        activeTargetID: teaseTargetID,
+        cursorVisible: false,
+        buzzProgress: buzz
+      )
+
+    case ..<Timing.dwellEnd:
+      // A slow breathe around the tease point makes the proximity lighting
+      // visibly track distance.
+      let breathe =
+        2.5 * sin(2 * .pi * (time - Timing.teaseEnd) / (Timing.dwellEnd - Timing.teaseEnd))
+      let offset = CGPoint(
+        x: (teaseTargetOffset.x * Self.teaseFraction)
+          + (breathe * Self.unitX(to: teaseTargetOffset)),
+        y: (teaseTargetOffset.y * Self.teaseFraction)
+          + (breathe * Self.unitY(to: teaseTargetOffset))
+      )
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .dwell,
+        presentationProgress: 1,
+        overallOpacity: 1,
+        bubbleOffset: offset,
+        mergeProgress: mergeProgress(at: offset, toward: teaseTargetOffset),
+        approachProgress: approachProgress(at: offset, toward: teaseTargetOffset),
+        activeTargetID: teaseTargetID,
+        cursorVisible: false,
+        buzzProgress: buzz
+      )
+
+    case ..<Timing.dismissEnd:
+      // The toggle press cancels the ring: it contracts and fades while the
+      // cursor returns.
+      let progress = Self.smootherstep(
+        (time - Timing.dwellEnd) / (Timing.dismissEnd - Timing.dwellEnd)
+      )
+      let offset = CGPoint(
+        x: teaseTargetOffset.x * Self.teaseFraction,
+        y: teaseTargetOffset.y * Self.teaseFraction
+      )
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .dismissing,
+        presentationProgress: 1 - (0.12 * progress),
+        overallOpacity: 1 - progress,
+        bubbleOffset: offset,
+        mergeProgress: mergeProgress(at: offset, toward: teaseTargetOffset),
+        approachProgress: approachProgress(at: offset, toward: teaseTargetOffset),
+        activeTargetID: teaseTargetID,
+        cursorVisible: true,
+        cursorShakeOffset: shake,
+        buzzProgress: buzz
+      )
+
+    case ..<Timing.desktopEnd:
+      return desktopFrame(index: clampedIndex, buzz: buzz, shake: shake)
+
+    // Act 2: the second press re-blooms the ring around the hidden cursor.
+    case ..<Timing.rebloomEnd:
+      let progress = Self.smoothstep(
+        (time - Timing.desktopEnd) / (Timing.rebloomEnd - Timing.desktopEnd)
+      )
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .rebloom,
+        presentationProgress: progress,
+        overallOpacity: min(1, progress * 1.7),
+        bubbleOffset: .zero,
+        mergeProgress: 0,
+        approachProgress: 0,
+        activeTargetID: nil,
+        cursorVisible: false,
+        buzzProgress: buzz
+      )
+
+    case ..<Timing.travelStart:
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .rebloom,
+        presentationProgress: 1,
+        overallOpacity: 1,
+        bubbleOffset: .zero,
+        mergeProgress: 0,
+        approachProgress: 0,
+        activeTargetID: nil,
+        cursorVisible: false,
+        buzzProgress: buzz
+      )
+
+    case ..<Timing.travelEnd:
       let progress = Self.smootherstep(
         (time - Timing.travelStart) / (Timing.travelEnd - Timing.travelStart)
       )
-      // A restrained lateral arc makes pointer motion legible without changing
-      // the exact terminal overlap point used by Core.
-      let lateralArc = 10 * sin(.pi * progress)
       let offset = CGPoint(
-        x: Self.interpolate(0, latchThresholdOffset.x, progress) + lateralArc,
+        x: Self.interpolate(0, latchThresholdOffset.x, progress),
         y: Self.interpolate(0, latchThresholdOffset.y, progress)
       )
       return GymDemoFrame(
@@ -521,65 +673,87 @@ public struct GymDemoTimeline: Sendable {
         presentationProgress: 1,
         overallOpacity: 1,
         bubbleOffset: offset,
-        mergeProgress: mergeProgress(at: offset),
-        selectionStrength: Self.smoothstep((progress - 0.08) / 0.28),
-        cursorVisible: false
+        mergeProgress: mergeProgress(at: offset, toward: commitTargetOffset),
+        approachProgress: approachProgress(at: offset, toward: commitTargetOffset),
+        activeTargetID: commitTargetID,
+        cursorVisible: false,
+        buzzProgress: buzz
       )
-    }
 
-    if time < Timing.suctionEnd {
+    case ..<Timing.suctionEnd:
       let progress = Self.smootherstep(
         (time - Timing.travelEnd) / (Timing.suctionEnd - Timing.travelEnd)
       )
-      let thresholdMerge = mergeProgress(at: latchThresholdOffset)
       return GymDemoFrame(
         index: clampedIndex,
         phase: .suction,
         presentationProgress: 1,
         overallOpacity: 1,
-        bubbleOffset: Self.interpolate(latchThresholdOffset, selectedTargetOffset, progress),
-        mergeProgress: Self.interpolate(thresholdMerge, 1, progress),
-        selectionStrength: 1,
-        cursorVisible: false
+        bubbleOffset: Self.interpolate(latchThresholdOffset, commitTargetOffset, progress),
+        mergeProgress: Self.interpolate(
+          mergeProgress(at: latchThresholdOffset, toward: commitTargetOffset), 1, progress
+        ),
+        approachProgress: Self.interpolate(
+          approachProgress(at: latchThresholdOffset, toward: commitTargetOffset), 1, progress
+        ),
+        activeTargetID: commitTargetID,
+        cursorVisible: false,
+        buzzProgress: buzz
       )
-    }
 
-    if time < Timing.dismissStart {
-      let progress = (time - Timing.suctionEnd) / (Timing.dismissStart - Timing.suctionEnd)
+    case ..<Timing.commitEnd:
+      let progress = (time - Timing.suctionEnd) / (Timing.commitEnd - Timing.suctionEnd)
       return GymDemoFrame(
         index: clampedIndex,
         phase: .committed,
         presentationProgress: 1,
         overallOpacity: 1,
-        bubbleOffset: selectedTargetOffset,
+        bubbleOffset: commitTargetOffset,
         mergeProgress: 1,
-        selectionStrength: 1,
+        approachProgress: 1,
+        activeTargetID: commitTargetID,
         cursorVisible: false,
+        buzzProgress: buzz,
         commitPulse: min(max(progress, 0), 1)
       )
-    }
 
-    if time < Timing.dismissEnd {
+    case ..<Timing.fadeEnd:
       let progress = Self.smootherstep(
-        (time - Timing.dismissStart) / (Timing.dismissEnd - Timing.dismissStart)
+        (time - Timing.commitEnd) / (Timing.fadeEnd - Timing.commitEnd)
       )
       return GymDemoFrame(
         index: clampedIndex,
         phase: .dismissing,
         presentationProgress: 1 - (0.12 * progress),
         overallOpacity: 1 - progress,
-        bubbleOffset: selectedTargetOffset,
+        bubbleOffset: commitTargetOffset,
         mergeProgress: 1,
-        selectionStrength: 1 - progress,
+        approachProgress: 1,
+        activeTargetID: commitTargetID,
         cursorVisible: true,
         commitPulse: 1
       )
-    }
 
-    return desktopFrame(index: clampedIndex)
+    default:
+      // The voice app takes over: the recording HUD settles in with the
+      // cursor back on the desktop.
+      let progress = Self.smoothstep((time - Timing.fadeEnd) / 0.32)
+      return GymDemoFrame(
+        index: clampedIndex,
+        phase: .recording,
+        presentationProgress: 1,
+        overallOpacity: 0,
+        bubbleOffset: commitTargetOffset,
+        mergeProgress: 1,
+        approachProgress: 1,
+        activeTargetID: nil,
+        cursorVisible: true,
+        recordingProgress: progress
+      )
+    }
   }
 
-  private func desktopFrame(index: Int) -> GymDemoFrame {
+  private func desktopFrame(index: Int, buzz: Double, shake: CGPoint) -> GymDemoFrame {
     GymDemoFrame(
       index: index,
       phase: .desktop,
@@ -587,17 +761,58 @@ public struct GymDemoTimeline: Sendable {
       overallOpacity: 0,
       bubbleOffset: .zero,
       mergeProgress: 0,
-      selectionStrength: 0,
-      cursorVisible: true
+      approachProgress: 0,
+      activeTargetID: nil,
+      cursorVisible: true,
+      cursorShakeOffset: shake,
+      buzzProgress: buzz
     )
   }
 
-  private func mergeProgress(at offset: CGPoint) -> Double {
-    let distance = hypot(
-      offset.x - selectedTargetOffset.x,
-      offset.y - selectedTargetOffset.y
+  private func mergeProgress(at offset: CGPoint, toward target: CGPoint) -> Double {
+    let distance = Self.distance(offset, target)
+    return min(
+      max(1 - (distance / RingInteractionProfile.default.mergeStartDistance), 0),
+      1
     )
-    return min(max(1 - (distance / RingInteractionProfile.default.mergeStartDistance), 0), 1)
+  }
+
+  private func approachProgress(at offset: CGPoint, toward target: CGPoint) -> Double {
+    min(
+      max(1 - (Self.distance(offset, target) / RingInteractionProfile.default.ringRadius), 0),
+      1
+    )
+  }
+
+  private static func distance(_ a: CGPoint, _ b: CGPoint) -> Double {
+    hypot(a.x - b.x, a.y - b.y)
+  }
+
+  private static func unitX(to target: CGPoint) -> Double {
+    let magnitude = hypot(target.x, target.y)
+    return magnitude > 0 ? target.x / magnitude : 0
+  }
+
+  private static func unitY(to target: CGPoint) -> Double {
+    let magnitude = hypot(target.x, target.y)
+    return magnitude > 0 ? target.y / magnitude : 0
+  }
+
+  private static func buzzProgress(at time: Double) -> Double {
+    for window in Timing.buzzWindows where time >= window.start && time < window.end {
+      return (time - window.start) / (window.end - window.start)
+    }
+    return 0
+  }
+
+  /// A decaying shake sells the physical Sense Panel click.
+  private static func cursorShake(buzz: Double) -> CGPoint {
+    guard buzz > 0 else { return .zero }
+    let decay = 1 - smoothstep(buzz)
+    return CGPoint(
+      x: 3.4 * sin(buzz * .pi * 9) * decay,
+      y: 1.2 * sin(buzz * .pi * 13) * decay
+    )
   }
 
   private static func interpolate(_ start: Double, _ end: Double, _ progress: Double) -> Double {

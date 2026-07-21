@@ -105,20 +105,28 @@ final class ConfigurationTests: XCTestCase {
   func testLogiLiquidDefaultHasRequestedCardinalCountsAndExecutableActionsOnly() throws {
     let configuration = MouseConfiguration.logiLiquidDefault
     XCTAssertNoThrow(try configuration.validate())
-    XCTAssertEqual(configuration.zones.top, ["Play Spotify"])
+    XCTAssertEqual(configuration.zones.top, [])
     XCTAssertEqual(
       configuration.zones.right,
-      ["Telegram", "ChatGPT Quick Chat"]
+      ["Telegram", "Twitter", "ChatGPT Quick Chat"]
     )
-    XCTAssertEqual(configuration.zones.bottom, [])
+    XCTAssertEqual(configuration.zones.bottom, ["Mission Control"])
     XCTAssertEqual(
       configuration.zones.left,
-      ["Aqua Voice", "CleanShot Capture", "CleanShot Record"]
+      ["CleanShot Record", "CleanShot Capture", "Aqua Voice"]
     )
     XCTAssertTrue(configuration.applicationSpecific.isEmpty)
     XCTAssertEqual(
       configuration.actions["Aqua Voice"],
-      .shortcut(ShortcutAction(key: "fn", repeatCount: 2))
+      .shortcut(ShortcutAction(key: "rightoption", repeatCount: 2))
+    )
+    XCTAssertEqual(
+      configuration.actions["Mission Control"],
+      .application(ApplicationAction(bundleID: "com.apple.exposelauncher"))
+    )
+    XCTAssertEqual(
+      configuration.actions["Twitter"],
+      .url(URLAction(url: URL(string: "https://x.com/")!))
     )
     XCTAssertEqual(
       configuration.actions["CleanShot Record"],

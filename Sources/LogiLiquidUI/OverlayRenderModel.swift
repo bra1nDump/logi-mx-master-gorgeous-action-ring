@@ -46,6 +46,8 @@ public struct OverlayRenderModel: Equatable, Sendable {
   public let bubbleOffset: CGPoint
   /// 0…1 fusion progress toward the current target; drives the metaball bridge.
   public let mergeProgress: Double
+  /// 0…1 approach toward the current target; drives gradual selection lighting.
+  public let approachProgress: Double
   /// The id of the current target, or `nil` when nothing is selected.
   public let currentTargetID: String?
 
@@ -57,6 +59,7 @@ public struct OverlayRenderModel: Equatable, Sendable {
     targets: [OverlayTargetModel],
     bubbleOffset: CGPoint,
     mergeProgress: Double,
+    approachProgress: Double = 0,
     currentTargetID: String?
   ) {
     self.phase = phase
@@ -64,6 +67,7 @@ public struct OverlayRenderModel: Equatable, Sendable {
     self.targets = targets
     self.bubbleOffset = bubbleOffset
     self.mergeProgress = mergeProgress
+    self.approachProgress = approachProgress
     self.currentTargetID = currentTargetID
   }
 
@@ -84,6 +88,7 @@ public struct OverlayRenderModel: Equatable, Sendable {
     }
     bubbleOffset = CGPoint(x: frame.movingBubbleOffset.x, y: frame.movingBubbleOffset.y)
     mergeProgress = frame.mergeProgress
+    approachProgress = frame.approachProgress
     currentTargetID = currentIndex.map(Self.identifier(forTargetIndex:))
   }
 

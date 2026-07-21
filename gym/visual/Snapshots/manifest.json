@@ -7,28 +7,28 @@
   "schemaVersion" : 1,
   "snapshots" : [
     {
-      "byteCount" : 1620546,
+      "byteCount" : 1625504,
       "file" : "invoked.png",
       "pixelHeight" : 1040,
       "pixelWidth" : 1440,
       "state" : "invoked"
     },
     {
-      "byteCount" : 1627216,
+      "byteCount" : 1631101,
       "file" : "targeting.png",
       "pixelHeight" : 1040,
       "pixelWidth" : 1440,
       "state" : "targeting"
     },
     {
-      "byteCount" : 1626083,
+      "byteCount" : 1628907,
       "file" : "latched-suction-threshold.png",
       "pixelHeight" : 1040,
       "pixelWidth" : 1440,
       "state" : "latched-suction-threshold"
     },
     {
-      "byteCount" : 1626083,
+      "byteCount" : 1628907,
       "file" : "committed.png",
       "pixelHeight" : 1040,
       "pixelWidth" : 1440,

@@ -8,3 +8,9 @@ Source: https://openai.com/brand/
 
 OpenAI, ChatGPT, and the OpenAI logo are trademarks of OpenAI. Their use is
 subject to OpenAI's brand guidelines and does not imply endorsement.
+
+# Twitter bird mark
+
+`TwitterBirdMark.svg` contains the former Twitter bird mark as a monochrome
+template for the action that opens Twitter. Twitter and the Twitter bird are
+trademarks of X Corp. Their use does not imply endorsement.

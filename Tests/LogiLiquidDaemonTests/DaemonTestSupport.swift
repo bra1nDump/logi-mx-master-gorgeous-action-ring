@@ -43,6 +43,9 @@ final class TestHIDBackend: MouseDaemonHIDBackend, @unchecked Sendable {
   private var handler: (@Sendable (MouseDaemonHIDEvent) -> Void)?
   private var active = false
   private var storedHapticError: (any Error)?
+  private var storedHealthProbeRequestCount = 0
+  private var storedSleepSuspensionCount = 0
+  private var storedSleepResumptionCount = 0
   private(set) var hapticWaveforms: [UInt8] = []
 
   var isActive: Bool {
@@ -52,6 +55,18 @@ final class TestHIDBackend: MouseDaemonHIDBackend, @unchecked Sendable {
   }
 
   var lastFailureDescription: String? { nil }
+
+  var healthProbeRequestCount: Int {
+    lock.withLock { storedHealthProbeRequestCount }
+  }
+
+  var sleepSuspensionCount: Int {
+    lock.withLock { storedSleepSuspensionCount }
+  }
+
+  var sleepResumptionCount: Int {
+    lock.withLock { storedSleepResumptionCount }
+  }
 
   var hapticError: (any Error)? {
     get { lock.withLock { storedHapticError } }
@@ -101,6 +116,18 @@ final class TestHIDBackend: MouseDaemonHIDBackend, @unchecked Sendable {
       sensePanelReporting: nil,
       diversionActive: isActive
     )
+  }
+
+  func requestHealthProbe(generation _: UInt64) {
+    lock.withLock { storedHealthProbeRequestCount += 1 }
+  }
+
+  func suspendInputForSleep() {
+    lock.withLock { storedSleepSuspensionCount += 1 }
+  }
+
+  func resumeInputAfterSleep() {
+    lock.withLock { storedSleepResumptionCount += 1 }
   }
 
   func playHaptic(waveformID: UInt8) throws {
@@ -239,6 +266,45 @@ struct FixedCursorProvider: CursorPositionProviding, Sendable {
   }
 }
 
+final class BlockingCursorProvider: CursorPositionProviding, @unchecked Sendable {
+  private let condition = NSCondition()
+  private let position: Vector2
+  private var requested = false
+  private var released = false
+
+  init(position: Vector2 = Vector2(x: 50, y: 60)) {
+    self.position = position
+  }
+
+  func currentPosition() throws -> Vector2 {
+    condition.lock()
+    requested = true
+    condition.broadcast()
+    while !released {
+      condition.wait()
+    }
+    condition.unlock()
+    return position
+  }
+
+  func waitUntilRequested(timeout: TimeInterval = 2) -> Bool {
+    let deadline = Date().addingTimeInterval(timeout)
+    condition.lock()
+    defer { condition.unlock() }
+    while !requested {
+      guard condition.wait(until: deadline) else { return false }
+    }
+    return true
+  }
+
+  func release() {
+    condition.lock()
+    released = true
+    condition.broadcast()
+    condition.unlock()
+  }
+}
+
 final class RecordingActionExecutor: ActionExecuting, @unchecked Sendable {
   private let lock = NSLock()
   private var storage: [ActionInvocation] = []
@@ -304,6 +370,7 @@ final class PublishedEventRecorder: @unchecked Sendable {
 func makeTestCoordinator(
   configuration: MouseConfiguration = MouseConfiguration(),
   cursorPosition: Vector2 = Vector2(x: 50, y: 60),
+  cursorPositionProvider: (any CursorPositionProviding)? = nil,
   terminalDeviceFailureHandler: @escaping @Sendable (String) -> Void = { _ in },
   latchedDwell: TimeInterval = MouseDaemonCoordinator.defaultLatchedDwell,
   sensePanelPressDebounceInterval: TimeInterval = 0,
@@ -333,7 +400,8 @@ func makeTestCoordinator(
     configurationLoader: repository,
     hidController: backend,
     eventPublisher: events,
-    cursorPositionProvider: FixedCursorProvider(position: cursorPosition),
+    cursorPositionProvider: cursorPositionProvider
+      ?? FixedCursorProvider(position: cursorPosition),
     actionExecutor: executor,
     cursorVisibilityController: visibility,
     cursorRestorationDelay: 0

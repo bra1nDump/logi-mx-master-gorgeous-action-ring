@@ -162,7 +162,14 @@ public struct RingLayout: Codable, Equatable, Sendable {
       maximumFanWidth,
       max(minimumFanWidth, preferredStep * Double(count - 1))
     )
-    return center - (fanWidth / 2) + (Double(index) * fanWidth / Double(count - 1))
+    let orderedProgress = Double(index) * fanWidth / Double(count - 1)
+    if zone == .left {
+      // Vertical zones read top-to-bottom. The left fan crosses the ±π seam,
+      // so increasing its angle would otherwise display configured actions in
+      // reverse order from the right fan.
+      return center + (fanWidth / 2) - orderedProgress
+    }
+    return center - (fanWidth / 2) + orderedProgress
   }
 }
 

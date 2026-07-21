@@ -139,6 +139,12 @@ private final class FixtureHIDBackend: MouseDaemonHIDBackend, @unchecked Sendabl
     )
   }
 
+  func requestHealthProbe(generation _: UInt64) {}
+
+  func suspendInputForSleep() {}
+
+  func resumeInputAfterSleep() {}
+
   func playHaptic(waveformID _: UInt8) throws {}
 }
 

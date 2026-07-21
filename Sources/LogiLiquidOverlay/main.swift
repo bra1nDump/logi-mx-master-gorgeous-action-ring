@@ -22,6 +22,12 @@ final class OverlayAppDelegate: NSObject, NSApplicationDelegate {
 }
 
 let application = NSApplication.shared
+let processInfo = ProcessInfo.processInfo
+// This is a persistent accessory process with no idle window. Prevent AppKit's
+// automatic-termination machinery from treating that normal state as an
+// expendable background application; launchd owns its lifetime instead.
+processInfo.disableAutomaticTermination("CommandBloom overlay event listener")
+processInfo.disableSuddenTermination()
 // Accessory: no dock icon, no menu bar presence, never becomes the active app.
 application.setActivationPolicy(.accessory)
 let delegate = OverlayAppDelegate()
